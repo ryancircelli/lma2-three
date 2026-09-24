@@ -13,6 +13,8 @@
 //   ?tank=<slug>:<n>,...  stock only these species (the Fish picker sets it);  ?bare=1  no painting (flat water)
 //   ?sound=0 / ?volume=<dB>   ambient loop off / its level (see audio.ts)
 //   ?speed=0.5..4      playback speed (also the Speed selector)
+//   ?aspect=fit|fill|stretch  window shape (also the View selector): 4:3 with
+//                      black bars (default), zoom to cover, or stretch
 //
 // Keys: F or double-click toggles fullscreen (UI and cursor hide until the
 // mouse moves; the display is kept awake); M toggles sound.
@@ -131,6 +133,14 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   const NUDGE_X = Number(params.get("dx") ?? 0.5); // + moves content right
   const NUDGE_Y = Number(params.get("dy") ?? 0.5); // + moves content down
 
+  // The original always shows exactly its 4:3 frame (1024x768). On any other
+  // window shape the camera stays that calibrated frame; only the rectangle it
+  // is drawn into changes (aspect.ts-style modes, ?aspect= / the View selector):
+  //   fit      the 4:3 frame, centred, black bars on the spare sides (default)
+  //   fill     the frame scaled to cover the window, the overflow cropped
+  //   stretch  the frame stretched to the window (what a monitor scaling a 4:3
+  //            mode to full screen does)
+  // Everything outside the frame is black, so nothing swims off into open water.
   function fit(): void {
     if (!current) return;
     const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -138,24 +148,26 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     const f = current.bounds;
     // The original's visible world extent (not quite square pixels at 1024x768).
     const vw = (f.max.x - f.min.x) / ZOOM_X, vh = (f.max.y - f.min.y) / ZOOM_Y;
-    let hw: number, hh: number;
-    if (Math.abs(w / h - 4 / 3) < 0.01) {
-      // The original's own 4:3 mode: reproduce each axis's calibration exactly.
-      hw = vw / 2;
-      hh = vh / 2;
-    } else {
-      // Any other shape: contain the view uniformly; spare room is margin.
-      const pxPerUnit = Math.min(w / vw, h / vh);
-      hw = w / pxPerUnit / 2;
-      hh = h / pxPerUnit / 2;
+    const hw = vw / 2, hh = vh / 2; // each axis's calibration, exactly
+    const A = 4 / 3;
+    const fw = w / h > A ? h * A : w, fh = fw / A; // the 4:3 frame fitted inside
+    let rw = fw, rh = fh;
+    if (aspectMode === "fill") {
+      const k = Math.max(w / fw, h / fh);
+      rw = fw * k;
+      rh = fh * k;
+    } else if (aspectMode === "stretch") {
+      rw = w;
+      rh = h;
     }
-    const cx = 0 - NUDGE_X * (2 * hw / w); // eye x = 0; the camera moves opposite to content
-    const cy = (f.min.y + f.max.y) / 2 + NUDGE_Y * (2 * hh / h);
+    frameRect.set(Math.round((w - rw) / 2), Math.round((h - rh) / 2), Math.round(rw), Math.round(rh));
+    const cx = 0 - NUDGE_X * (2 * hw / rw); // eye x = 0; the camera moves opposite to content
+    const cy = (f.min.y + f.max.y) / 2 + NUDGE_Y * (2 * hh / rh);
     Object.assign(camera, { left: cx - hw, right: cx + hw, top: cy + hh, bottom: cy - hh });
     camera.updateProjectionMatrix();
     // The fish camera sees exactly this view at the painting's plane.
     tank.setView(cx, cy, hw, hh);
-    effects.setScale(renderer.getDrawingBufferSize(new THREE.Vector2()).y / (2 * hh)); // --- effects
+    effects.setScale(rh * renderer.getPixelRatio() / (2 * hh)); // --- effects (frame px per unit)
   }
   new ResizeObserver(fit).observe(canvas);
 
@@ -186,6 +198,25 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   const label = document.createElement("label");
   label.append("Scene ", select);
   panel.append(label);
+
+  // View: how the 4:3 frame meets a window of another shape (see fit()).
+  const aspectSelect = document.createElement("select");
+  for (const [mode, text] of ASPECTS) aspectSelect.add(new Option(text, mode));
+  aspectSelect.value = aspectMode;
+  aspectSelect.addEventListener("change", () => {
+    aspectMode = aspectSelect.value as AspectMode;
+    try {
+      localStorage.setItem("lma2.aspect", aspectMode);
+    } catch { /* storage blocked: the URL still carries it */ }
+    if (aspectMode === "fit") params.delete("aspect");
+    else params.set("aspect", aspectMode);
+    history.replaceState(null, "", query());
+    fit();
+  });
+  const aspectLabel = document.createElement("label");
+  aspectLabel.append("View ", aspectSelect);
+  aspectLabel.title = "Fit keeps the original 4:3 picture with black bars; Fill zooms to cover and crops; Stretch fills by stretching";
+  panel.append(aspectLabel);
   if (params.get("clean") !== "1" && frozenT === null) ambience(ASSETS + "common/Sound_undwater.ogg", params, panel);
 
   async function show(id: string): Promise<void> {
@@ -310,6 +341,15 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     surface.update(t); // water surface
     if (frozenT === null) tank.update(Math.min(t - last, 0.1));
     last = t;
+    // Black outside the frame (letterbox/pillarbox bars), then clip to it.
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, canvas.clientWidth, canvas.clientHeight);
+    renderer.setClearColor(0x000000, 1);
+    renderer.clear();
+    const r = frameRect, H = canvas.clientHeight; // three.js viewports count y from the bottom
+    renderer.setViewport(r.x, H - r.y - r.h, r.w, r.h);
+    renderer.setScissor(Math.max(r.x, 0), Math.max(H - r.y - r.h, 0), Math.min(r.w, canvas.clientWidth), Math.min(r.h, H));
+    renderer.setScissorTest(true);
     renderer.clear();
     paint(0); // Z off: writes no depth
     tank.renderBehind(renderer); // Z on
@@ -428,6 +468,22 @@ async function fishView(manifest: Manifest): Promise<(t: number) => void> {
 // --- main -----------------------------------------------------------------------
 
 const SPEEDS = [0.5, 1, 1.5, 2, 3, 4];
+
+// --- window shape (see fit() in tankView) --------------------------------------
+type AspectMode = "fit" | "fill" | "stretch";
+const ASPECTS: [AspectMode, string][] = [["fit", "Fit (4:3, black bars)"], ["fill", "Fill (crop)"], ["stretch", "Stretch"]];
+function loadAspect(): AspectMode {
+  const q = params.get("aspect");
+  if (q === "fit" || q === "fill" || q === "stretch") return q;
+  try {
+    const v = localStorage.getItem("lma2.aspect");
+    if (v === "fit" || v === "fill" || v === "stretch") return v;
+  } catch { /* storage blocked */ }
+  return "fit";
+}
+let aspectMode: AspectMode = loadAspect();
+/** The on-screen rectangle the 4:3 frame is drawn into, in CSS px from the top-left. */
+const frameRect = { x: 0, y: 0, w: 1, h: 1, set(x: number, y: number, w: number, h: number) { Object.assign(this, { x, y, w, h }); } };
 
 async function main(): Promise<void> {
   const res = await fetch(ASSETS + "manifest.json");
