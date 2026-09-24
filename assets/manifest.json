@@ -1,0 +1,475 @@
+{
+  "generated": "2026-09-23T23:00:59.569Z",
+  "source": "/mnt/c/Program Files (x86)/Freeze.com/Living Marine Aquarium 2 Full",
+  "tankSource": "/mnt/c/Program Files (x86)/Freeze.com/Living Marine Aquarium 2 Full/settings.xml",
+  "common": [
+    "BUBBLE.dds",
+    "caustics_01.dds",
+    "caustics_02.dds",
+    "caustics_03.dds",
+    "caustics_04.dds",
+    "caustics_05.dds",
+    "caustics_06.dds",
+    "caustics_07.dds",
+    "caustics_08.dds",
+    "caustics_09.dds",
+    "caustics_10.dds",
+    "caustics_11.dds",
+    "caustics_12.dds",
+    "caustics_13.dds",
+    "caustics_14.dds",
+    "caustics_15.dds",
+    "caustics_16.dds",
+    "caustics_17.dds",
+    "caustics_18.dds",
+    "caustics_19.dds",
+    "caustics_20.dds",
+    "caustics_21.dds",
+    "caustics_22.dds",
+    "caustics_23.dds",
+    "caustics_24.dds",
+    "caustics_25.dds",
+    "caustics_26.dds",
+    "caustics_27.dds",
+    "caustics_28.dds",
+    "caustics_29.dds",
+    "light.dds",
+    "preview_full.jpg",
+    "ray.dds",
+    "ray.X",
+    "shadow.dds",
+    "Sound_undwater.ogg",
+    "splashfull.jpg",
+    "watersurface.X"
+  ],
+  "scenes": [
+    {
+      "id": "1",
+      "files": [
+        "1.dds",
+        "2.dds",
+        "3.dds",
+        "4.dds",
+        "anemone_1_0.dds",
+        "anemone_1_1.dds",
+        "anemone_2_0.dds",
+        "anemone_2_1.dds",
+        "bg_slice01.dds",
+        "bg_slice02.dds",
+        "bg_slice03.dds",
+        "bg_slice04.dds",
+        "bg_slice05.dds",
+        "bg_slice06.dds",
+        "bg_slice07.dds",
+        "bg_slice08.dds",
+        "bg_slice10.dds",
+        "fg_slice03.dds",
+        "fg_slice04.dds",
+        "fg_slice05.dds",
+        "fg_slice06.dds",
+        "fg_slice07.dds",
+        "fg_slice08.dds",
+        "fg_slice09.dds",
+        "fg_slice10.dds",
+        "fg_slice11.dds",
+        "fg_slice12.dds",
+        "mask.dds",
+        "mesh.X",
+        "path.X"
+      ]
+    },
+    {
+      "id": "2",
+      "files": [
+        "bg_slice01.dds",
+        "bg_slice02.dds",
+        "bg_slice03.dds",
+        "bg_slice04.dds",
+        "bg_slice07.dds",
+        "bg_slice08.dds",
+        "fg_slice01.dds",
+        "fg_slice02.dds",
+        "fg_slice03.dds",
+        "fg_slice04.dds",
+        "fg_slice05.dds",
+        "fg_slice06.dds",
+        "fg_slice07.dds",
+        "fg_slice08.dds",
+        "fg_slice09.dds",
+        "fg_slice10.dds",
+        "fg_slice11.dds",
+        "fg_slice12.dds",
+        "Flowers-0.dds",
+        "Flowers-1.dds",
+        "High Grass-0.dds",
+        "High Grass-1.dds",
+        "mesh.X",
+        "path.X",
+        "Red Grass-0.dds",
+        "Red Grass-1.dds",
+        "SpondeGreen-0.dds",
+        "SpondeGreen-1.dds"
+      ]
+    },
+    {
+      "id": "3",
+      "files": [
+        "Anemone-0.dds",
+        "Anemone-1.dds",
+        "bg_slice01.dds",
+        "bg_slice02.dds",
+        "bg_slice03.dds",
+        "bg_slice04.dds",
+        "bg_slice05.dds",
+        "bg_slice06.dds",
+        "bg_slice07.dds",
+        "bg_slice08.dds",
+        "bg_slice11.dds",
+        "Blue anemones-0.dds",
+        "Blue anemones-1.dds",
+        "fg_slice01.dds",
+        "fg_slice04.dds",
+        "fg_slice05.dds",
+        "fg_slice06.dds",
+        "fg_slice07.dds",
+        "fg_slice08.dds",
+        "fg_slice09.dds",
+        "fg_slice10.dds",
+        "fg_slice11.dds",
+        "fg_slice12.dds",
+        "mesh.X",
+        "path.X",
+        "YellowGrass-0.dds",
+        "YellowGrass-1.dds"
+      ]
+    }
+  ],
+  "fish": [
+    {
+      "slug": "anemone-crab",
+      "name": "Anemone Crab",
+      "files": [
+        "anemone_crab.dds",
+        "full_mesh.X",
+        "mesh.X"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {}
+    },
+    {
+      "slug": "bicolor-angel",
+      "name": "Bicolor Angel",
+      "files": [
+        "bicolor_angel.dds",
+        "mesh.X",
+        "settings.xml"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {
+        "school": 1,
+        "scale": 7,
+        "speed": 10,
+        "aggression": 20,
+        "behav": 1
+      }
+    },
+    {
+      "slug": "blue-hippo-tang",
+      "name": "Blue Hippo Tang",
+      "files": [
+        "hepatus.dds",
+        "mesh.X",
+        "settings.xml"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {
+        "school": 1,
+        "scale": 10,
+        "speed": 10,
+        "aggression": 20,
+        "behav": 1
+      }
+    },
+    {
+      "slug": "clown-trigger",
+      "name": "Clown Trigger",
+      "files": [
+        "mesh.X",
+        "settings.xml",
+        "trigger.dds"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {
+        "school": 0,
+        "scale": 15,
+        "speed": 20,
+        "aggression": 20,
+        "behav": 2
+      }
+    },
+    {
+      "slug": "convict-tang",
+      "name": "Convict Tang",
+      "files": [
+        "convict_tang.dds",
+        "mesh.X",
+        "settings.xml"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {
+        "school": 1,
+        "scale": 6,
+        "speed": 10,
+        "aggression": 20,
+        "behav": 1
+      }
+    },
+    {
+      "slug": "cuban-hog",
+      "name": "Cuban Hog",
+      "files": [
+        "cuban_hogfish.dds",
+        "mesh.X",
+        "settings.xml"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {
+        "school": 1,
+        "scale": 8,
+        "speed": 10,
+        "aggression": 20,
+        "behav": 1
+      }
+    },
+    {
+      "slug": "flame-angel",
+      "name": "Flame Angel",
+      "files": [
+        "Flame_Angel.dds",
+        "mesh.X",
+        "settings.xml"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {
+        "school": 0,
+        "scale": 4,
+        "speed": 10,
+        "aggression": 20,
+        "behav": 1
+      }
+    },
+    {
+      "slug": "juvenile-angel",
+      "name": "Juvenile Angel",
+      "files": [
+        "juvenal.dds",
+        "mesh.X",
+        "settings.xml"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {
+        "school": 0,
+        "scale": 10,
+        "speed": 10,
+        "aggression": 20,
+        "behav": 1
+      }
+    },
+    {
+      "slug": "majestic-angel",
+      "name": "Majestic Angel",
+      "files": [
+        "majestic_angel.dds",
+        "mesh.X",
+        "settings.xml"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {
+        "school": 0,
+        "scale": 10,
+        "speed": 10,
+        "aggression": 20,
+        "behav": 1
+      }
+    },
+    {
+      "slug": "moorish-idol",
+      "name": "Moorish Idol",
+      "files": [
+        "mesh.X",
+        "morish_idol.dds",
+        "settings.xml"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {
+        "school": 1,
+        "scale": 7,
+        "speed": 10,
+        "aggression": 20,
+        "behav": 1
+      }
+    },
+    {
+      "slug": "percula-clown",
+      "name": "Percula Clown",
+      "files": [
+        "mesh.X",
+        "percula.dds",
+        "settings.xml"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {
+        "school": 1,
+        "scale": 4,
+        "speed": 15,
+        "aggression": 5,
+        "behav": 0
+      }
+    },
+    {
+      "slug": "powder-brown-tang",
+      "name": "Powder Brown Tang",
+      "files": [
+        "acanthurus.dds",
+        "mesh.X",
+        "settings.xml"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {
+        "school": 1,
+        "scale": 8,
+        "speed": 10,
+        "aggression": 20,
+        "behav": 1
+      }
+    },
+    {
+      "slug": "purple-tang",
+      "name": "Purple Tang",
+      "files": [
+        "mesh.X",
+        "purple_tang.dds",
+        "settings.xml"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {
+        "school": 0,
+        "scale": 8,
+        "speed": 10,
+        "aggression": 20,
+        "behav": 1
+      }
+    },
+    {
+      "slug": "raccoon-butterfly",
+      "name": "Raccoon Butterfly",
+      "files": [
+        "mesh.X",
+        "racoon_butterfly.dds",
+        "settings.xml"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {
+        "school": 1,
+        "scale": 5,
+        "speed": 10,
+        "aggression": 20,
+        "behav": 1
+      }
+    },
+    {
+      "slug": "regal-angel",
+      "name": "Regal Angel",
+      "files": [
+        "mesh.X",
+        "regal_angel.bmp",
+        "regal_angel.dds",
+        "settings.xml"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {
+        "school": 0,
+        "scale": 13,
+        "speed": 10,
+        "aggression": 20,
+        "behav": 1
+      }
+    },
+    {
+      "slug": "sea-horse",
+      "name": "Sea Horse",
+      "files": [
+        "hippocampus.dds",
+        "mesh.X"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {}
+    },
+    {
+      "slug": "sea-star",
+      "name": "Sea Star",
+      "files": [
+        "mesh.X",
+        "sea_star_diffuse.dds",
+        "sea_star_down_diffuse.dds",
+        "sea_star_shadow.dds"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {}
+    },
+    {
+      "slug": "yellow-angel",
+      "name": "Yellow Angel",
+      "files": [
+        "mesh.X",
+        "settings.xml",
+        "yellow_angel.dds"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {
+        "school": 1,
+        "scale": 6,
+        "speed": 10,
+        "aggression": 20,
+        "behav": 1
+      }
+    },
+    {
+      "slug": "yellow-tang",
+      "name": "Yellow Tang",
+      "files": [
+        "mesh.X",
+        "settings.xml",
+        "yellow_tang.dds"
+      ],
+      "picture": "picture.jpg",
+      "behaviour": {
+        "school": 1,
+        "scale": 8,
+        "speed": 10,
+        "aggression": 20,
+        "behav": 1
+      }
+    }
+  ],
+  "tank": {
+    "anemone-crab": 1,
+    "bicolor-angel": 1,
+    "blue-hippo-tang": 1,
+    "convict-tang": 0,
+    "clown-trigger": 2,
+    "cuban-hog": 2,
+    "flame-angel": 0,
+    "juvenile-angel": 0,
+    "majestic-angel": 1,
+    "moorish-idol": 1,
+    "percula-clown": 5,
+    "purple-tang": 0,
+    "raccoon-butterfly": 0,
+    "regal-angel": 1,
+    "sea-star": 1,
+    "sea-horse": 0,
+    "yellow-angel": 1,
+    "yellow-tang": 0
+  }
+}

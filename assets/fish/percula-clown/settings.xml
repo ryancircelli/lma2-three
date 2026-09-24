@@ -1,0 +1,8 @@
+<fish>
+  <school value="1"/>
+  <scale value="4"/>
+  <speed value="15"/>
+  <aggression value="5"/>
+  <behav value="0"/>
+</fish>
+
