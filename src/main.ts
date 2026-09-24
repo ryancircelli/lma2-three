@@ -84,9 +84,8 @@ function done(subject: string, detail: string): void {
 // --- tank view ------------------------------------------------------------------
 
 async function tankView(manifest: Manifest): Promise<(t: number) => void> {
-  // Open water behind the painting is one flat colour: measured rgb(0,138,255)
-  // at every open-water sample below the surface band of a reference frame.
-  scene.background = new THREE.Color().setRGB(0, 138 / 255, 1, THREE.SRGBColorSpace);
+  // Open water behind the painting is one flat colour per scene (scene.ts
+  // CLEAR_COLOR); set in show().
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 20000);
   camera.position.set(0, 0, 10000); // looking down -Z = the original's +Z after the mirror
   let current: SceneModel | null = null;
@@ -169,6 +168,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
       current.dispose();
     }
     current = model;
+    scene.background = model.clearColor;
     scene.add(model.object);
     nearScene.add(model.near);
     fit();
