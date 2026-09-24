@@ -201,7 +201,10 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     scene.traverse((o) => {
       if (drawable(o)) o.visible = (o.name === "Background") === background;
     });
+    const water = scene.background; // a colour background clears: only on the first pass
+    if (!background) scene.background = null;
     renderer.render(scene, camera);
+    scene.background = water;
   };
   let last = 0;
   return (t) => {

@@ -1,7 +1,7 @@
 // Motion statistics, side by side, for reference tracks (tools/track.ts --json)
 // and our own creatures (a probe dump from Tank.probe(), see below).
 //
-//   deno run -A tools/motion-stats.ts [--species slug] label=file.json ...
+//   deno run -A tools/motion-stats.ts [--species slug] label=file.json[+file2.json...] ...
 //
 // A probe dump is {probe: true, species: string[], samples: [t, [[i, x0, y0, x1, y1], ...]][]}
 // where i indexes `species` per creature slot (slot order is stable), sampled
@@ -32,7 +32,9 @@ function fromProbe(d: { species: string[]; samples: [number, number[][]][] }, on
       if (only && d.species[si] !== only) return;
       // keep what a capture could see: on screen
       if (x1 < 0 || x0 > 1024 || y1 < 0 || y0 > 768) return;
-      const b = { t, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, x0: Math.max(0, x0), y0: Math.max(0, y0), x1: Math.min(1023, x1), y1: Math.min(767, y1) };
+      // clipped to the screen, as a captured silhouette is
+      const cx0 = Math.max(0, x0), cy0 = Math.max(0, y0), cx1 = Math.min(1023, x1), cy1 = Math.min(767, y1);
+      const b = { t, cx: (cx0 + cx1) / 2, cy: (cy0 + cy1) / 2, x0: cx0, y0: cy0, x1: cx1, y1: cy1 };
       fr.push(b);
       if (!tracks.has(slot)) tracks.set(slot, []);
       tracks.get(slot)!.push(b);
@@ -90,8 +92,13 @@ function stats(frames: Blob[][], tracks: Blob[][]) {
 console.log("label".padEnd(28) + "  blobs  speed p50/p90 px/s  |vy/vx|  turns/min  centre-y p02/p50/p98   width p50/p90  height p50/p90");
 for (const a of args._.map(String)) {
   const [label, file] = a.includes("=") ? a.split("=") : [a, a];
-  const d = JSON.parse(await Deno.readTextFile(file));
-  const { frames, tracks } = d.probe ? fromProbe(d, args.species) : { frames: d.frames as Blob[][], tracks: d.tracks as Blob[][] };
+  // file1+file2+...: pool several runs
+  const frames: Blob[][] = [], tracks: Blob[][] = [];
+  for (const one of file.split("+")) {
+    const d = JSON.parse(await Deno.readTextFile(one));
+    const r = d.probe ? fromProbe(d, args.species) : { frames: d.frames as Blob[][], tracks: d.tracks as Blob[][] };
+    frames.push(...r.frames), tracks.push(...r.tracks);
+  }
   const s = stats(frames, tracks);
   console.log(
     `${label.padEnd(28)}  ${String(s.n).padStart(5)}  ${f0(s.speed50).padStart(6)}/${f0(s.speed90).padEnd(12)} ${f0(s.slope50, 2).padStart(6)}  ${

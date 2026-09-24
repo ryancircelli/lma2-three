@@ -176,6 +176,7 @@ interface Crab {
   inst: FishInstance;
   holder: THREE.Group;
   shadow: THREE.Mesh;
+  body: THREE.Object3D;
   walk: PathWalker;
   dir: number; // +1 right, -1 left
   speed: number;
@@ -214,6 +215,8 @@ export class Tank {
   readonly behind = new THREE.Scene();
   /** Crab and sea star (drawn after the painting, before the front creatures). */
   readonly floor = new THREE.Scene();
+  /** The crab's shadow, drawn just before the crab (Z off). */
+  private underlay = new THREE.Scene();
   /** A sea star on the front glass: drawn over everything. */
   readonly glass = new THREE.Scene();
   /** The painting's orthographic camera (setView). */
@@ -438,6 +441,14 @@ export class Tank {
     );
     f.yaw = (this.rand() % 100 + 1) * 2 * Math.PI / 100;
     f.pitch = (this.rand() % 100 + 1) * Math.PI / 400 - Math.PI / 8;
+    if (f.kind === "horse") {
+      // The sea horse's navigator starts from the box centre and pre-simulates
+      // rand()%45+10 steps (docs 9). Approximated [inferred]: level, near the
+      // centre height. Measured: horses swim level (|vy/vx| p50 0.07) at
+      // screen y 186-338 in scene 1.
+      f.pos.y = (z.minY + z.maxY) / 2 + (z.maxY - z.minY) * 0.1 * (this.random() * 2 - 1);
+      f.pitch = 0;
+    }
     const lim = 0.25 * (d.bounds.maxZ - d.bounds.minZ);
     if (Math.abs(f.pos.z) < lim) f.pos.y = Math.max(f.pos.y, this.reefLine(f.pos.x, f.pos.z, z));
     f.turnTarget = 0;
@@ -473,8 +484,8 @@ export class Tank {
       new THREE.PlaneGeometry(200, 200).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }),
     );
-    shadow.renderOrder = -1;
-    body.add(shadow);
+    shadow.matrixAutoUpdate = false;
+    this.underlay.add(shadow); // drawn before the body (its own pass), Z off
     this.floor.add(holder);
     const walk = new PathWalker(this.data.walkPath);
     walk.i = Math.min(4, this.data.walkPath.length - 3); // starts at sorted point 4
@@ -482,6 +493,7 @@ export class Tank {
       inst,
       holder,
       shadow,
+      body,
       walk,
       dir: -1, // it starts moving left
       speed: 4,
@@ -532,7 +544,9 @@ export class Tank {
     const slope = Math.atan2(p.ty, p.tx);
     c.holder.position.set(p.x, p.y, -b.minZ);
     c.holder.rotation.set(0, 0, slope);
-        c.shadow.position.y = 3 * Math.sin(c.phase) - 10;
+        c.holder.updateMatrixWorld(true);
+    c.shadow.matrix.copy(c.body.matrixWorld).multiply(new THREE.Matrix4().makeTranslation(0, 3 * Math.sin(c.phase) - 10, 0));
+    c.shadow.matrixWorldNeedsUpdate = true;
   }
 
   // --- sea star -------------------------------------------------------------------
@@ -893,6 +907,7 @@ export class Tank {
   /** Crab and sea star, then (Z cleared) the front creatures, then a sea star on the glass. */
   renderFront(renderer: THREE.WebGLRenderer): void {
     renderer.clearDepth();
+    renderer.render(this.underlay, this.camera);
     renderer.render(this.floor, this.camera);
     renderer.clearDepth();
     renderer.render(this.scene, this.camera);
@@ -941,7 +956,7 @@ export class Tank {
     this.fish = [];
     this.crabs = [];
     this.stars = [];
-    for (const s of [this.scene, this.behind, this.floor, this.glass]) {
+    for (const s of [this.scene, this.behind, this.floor, this.glass, this.underlay]) {
       for (const o of [...s.children]) if (!(o instanceof THREE.Light)) s.remove(o);
     }
   }
