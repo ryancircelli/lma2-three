@@ -20,6 +20,7 @@
 
 // @ts-types="npm:@types/three@0.186.0"
 import * as THREE from "three";
+import { type Caustics, createCaustics } from "./caustics.ts"; // caustics hook
 import { buildMesh, handednessRoot, isRenderable, loadXDoc, XTextureCache, type XMesh } from "./xloader.ts";
 
 /**
@@ -305,6 +306,7 @@ export async function loadScene(id: string, assetsUrl: string, opts: SceneOption
   const billboards: Billboard[] = [];
   const frame3 = new THREE.Box3();
   const table = BILLBOARDS[id] ?? {};
+  let caustics: Caustics | null = null; // caustics hook
 
   // Bake each mesh's world matrix into its vertices. Object3D.applyMatrix4()
   // would decompose it into position/rotation/scale and silently DROP any
@@ -338,7 +340,14 @@ export async function loadScene(id: string, assetsUrl: string, opts: SceneOption
   for (const m of doc.meshes) {
     if (!isRenderable(m)) continue;
 
-    if (m.name === "Relief") continue; // caustics carrier - added with the caustics effect
+    // --- caustics hook (src/caustics.ts): Relief carries the caustic light ---
+    if (m.name === "Relief") {
+      caustics = createCaustics(m, id, assetsUrl);
+      // In pass 1 (mirrored like the rest); renderOrder 10 = after the Foreground (0), before near plants (z < 0).
+      if (caustics) front.add(caustics.object);
+      continue;
+    }
+    // --- end caustics hook ---
 
     if (m.name === "Background" || m.name === "Foreground") {
       const obj = buildMesh(m, textures);
@@ -395,6 +404,7 @@ export async function loadScene(id: string, assetsUrl: string, opts: SceneOption
   // experiments), moving per their class (animate). Driven only by `t`, so a
   // frozen ?t= reproduces a pose exactly.
   function update(t: number): void {
+    caustics?.update(t); // caustics hook
     const [a, b] = opts.billboardOpacity ?? [1, 1];
     for (const bb of billboards) {
       bb.a.material.opacity = a;
