@@ -57,7 +57,7 @@ export interface FishInstance {
 }
 
 export interface FishModel {
-  /** Handedness-corrected, centred on the origin. Heads point along +X. */
+  /** Handedness-corrected, centred on the origin (unless loaded with recentre: false). Heads point along +X. */
   object: THREE.Group;
   kind: PoseGroup["kind"];
   /** Bounding-sphere radius, in model units. */
@@ -72,7 +72,18 @@ export interface FishModel {
   dispose(): void;
 }
 
-export async function loadFish(entry: FishEntry, assetsUrl: string): Promise<FishModel> {
+export interface LoadOptions {
+  /**
+   * Centre the model on its bounding box (default, for the model viewer). The
+   * tank passes false: the original draws every creature from its raw .X
+   * origin, which is off the box centre by (5.4, 7.25) units on the crab,
+   * (9.1, 4.0) on the sea star (its spin axis) and 9.3 along the sea horse
+   * (docs/fidelity-review.md D5); by ~0 on the fish.
+   */
+  recentre?: boolean;
+}
+
+export async function loadFish(entry: FishEntry, assetsUrl: string, opts: LoadOptions = {}): Promise<FishModel> {
   const base = `${assetsUrl}fish/${entry.slug}/`;
   const textures = new XTextureCache(base);
   const doc = await loadXDoc(base + "mesh.X");
@@ -114,11 +125,12 @@ export async function loadFish(entry: FishEntry, assetsUrl: string): Promise<Fis
   object.name = entry.slug;
   object.add(inner);
 
-  // Centre on the origin (in the mirrored space the viewer sees).
+  // Centre on the origin (in the mirrored space the viewer sees), unless the
+  // raw origin is wanted.
   object.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(object);
   const sphere = box.getBoundingSphere(new THREE.Sphere());
-  inner.position.sub(object.worldToLocal(box.getCenter(new THREE.Vector3())));
+  if (opts.recentre !== false) inner.position.sub(object.worldToLocal(box.getCenter(new THREE.Vector3())));
 
   let triangles = 0;
   object.traverse((o) => {

@@ -322,7 +322,7 @@ export class Tank {
   private async model(entry: FishEntry, assetsUrl: string): Promise<FishModel> {
     let m = this.models.get(entry.slug);
     if (!m) {
-      m = await loadFish(entry, assetsUrl);
+      m = await loadFish(entry, assetsUrl, { recentre: false }); // raw .X origins, as the original draws them
       applyFixedFunction(m.object, m.kind === "swim" ? FISH : m.kind === "sway" ? HORSE : FLOOR); // D3D6 lighting and blending
       applyCreatureCaustics(m.object, m.kind, assetsUrl); // caustics hook: caustic / causticonfish pass
       if (m.kind === "cycle") attachCrabShadow(m.object, assetsUrl); // caustics hook: crab shadow (after caustics)
