@@ -1300,6 +1300,27 @@ export class Tank {
     return out;
   }
 
+  /**
+   * Measurement hook (tools/probe-track.ts): every visible creature's meshes
+   * with their world matrices, for rasterising silhouettes. Shadows are left
+   * out, as in probe().
+   */
+  silhouettes(): { species: string; front: boolean; meshes: { geometry: THREE.BufferGeometry; matrix: THREE.Matrix4 }[] }[] {
+    const all: [string, boolean, THREE.Object3D][] = [
+      ...this.roster.filter((f) => f.holder).map((f) => [f.species, f.front, f.holder!] as [string, boolean, THREE.Object3D]),
+      ...this.crabs.map((c) => ["anemone-crab", true, c.holder] as [string, boolean, THREE.Object3D]),
+      ...this.stars.map((s) => ["sea-star", true, s.holder] as [string, boolean, THREE.Object3D]),
+    ];
+    return all.map(([species, front, holder]) => {
+      holder.updateMatrixWorld(true);
+      const meshes: { geometry: THREE.BufferGeometry; matrix: THREE.Matrix4 }[] = [];
+      holder.traverse((o) => {
+        if (o instanceof THREE.Mesh && o.visible && !/shadow/i.test(o.name)) meshes.push({ geometry: o.geometry, matrix: o.matrixWorld });
+      });
+      return { species, front, meshes };
+    });
+  }
+
   get count(): number {
     return this.fish.filter((f) => f.holder).length + this.crabs.length + this.stars.length;
   }
