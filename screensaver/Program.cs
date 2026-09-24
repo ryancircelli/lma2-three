@@ -67,6 +67,8 @@ namespace Lma2Saver
                     case "/uninstall": // Apps & features
                         Installer.ConfirmAndUninstall(null);
                         return 0;
+                    case "/copyto": // the elevated half of Install
+                        return rest == null ? 1 : Installer.CopyTo(rest);
                     default:
                         // Run as an .exe (LMA2-Aquarium-Setup.exe): the installer.
                         // As an .scr with /c (Screen Saver Settings): its settings.

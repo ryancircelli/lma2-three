@@ -118,11 +118,15 @@ every load is a fresh launch. `?seed=N` replays one; reference captures (`?t=`, 
 WebView2 (the Edge engine built into Windows 10/11) on .NET Framework 4.8 (also built in), so nothing needs installing.
 
 - **Install:** run [LMA2-Aquarium-Setup.exe](https://github.com/ryancircelli/lma2-three/releases/latest/download/LMA2-Aquarium-Setup.exe),
-  choose the settings (the Fish default is the original tank plus one of every other species: 25) and press **Install**. It installs
-  per user without admin rights: the screensaver goes to `%LOCALAPPDATA%\LMA2Screensaver\LMA2-Aquarium.scr`, is selected in
-  Screen Saver Settings, and gets an Apps & features entry for uninstalling. Running Setup again offers Update and Uninstall.
-  It isn't code-signed, so SmartScreen may warn: *More info* > *Run anyway*. (`LMA2-Aquarium.scr` is also published for manual
-  installs; double-clicking an `.scr` just runs it, which is why Setup is an `.exe`.)
+  choose the settings (the Fish default is the original tank plus one of every other species: 25) and press **Install**.
+  After one admin (UAC) prompt it is copied to `C:\Windows\System32\Living Marine Aquarium 2 Remake.scr` - Windows' Screen
+  Saver Settings only lists screensavers from the system folder, as the original's own installer knew - then selected with
+  Windows' own `rundll32 desk.cpl,InstallScreenSaver` (what right-click > Install does), which opens that dialog on it. Its
+  **Settings...** button opens these options (`/c`) and **Preview** works; the wait time and sign-in on resume stay Windows'
+  settings. Declining the prompt installs per user to `%LOCALAPPDATA%\LMA2Screensaver\` instead. It coexists with the
+  original 2005 screensaver. Apps & features has an uninstall entry; running Setup again offers Update and Uninstall.
+  It isn't code-signed, so browsers and SmartScreen may warn: *Keep* / *More info* > *Run anyway*. (`LMA2-Aquarium.scr` is
+  also published for manual installs; double-clicking an `.scr` just runs it, which is why Setup is an `.exe`.)
 - **Behaviour:** the same program is the installer (run as an `.exe` without arguments) and the screensaver. `/s` fills every monitor (or only the primary, by setting) and, like the original, exits on any key, mouse
   button, or a mouse move of more than 120 px; sound plays on the primary monitor only. `/p` draws the Screen Saver Settings
   preview; `/c` (or a double-click) opens its settings: scene, widescreen mode, speed, fish, schooling, sound, monitors

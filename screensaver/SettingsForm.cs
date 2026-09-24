@@ -148,9 +148,10 @@ namespace Lma2Saver
         private void DoInstall()
         {
             Store();
+            string note;
             try
             {
-                Installer.Install();
+                note = Installer.Install();
             }
             catch (Exception ex)
             {
@@ -159,11 +160,13 @@ namespace Lma2Saver
                     Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
-            DialogResult open = MessageBox.Show(this,
-                "Installed. Living Marine Aquarium 2 is now your screensaver.\n\n" +
-                "Open Windows' Screen Saver Settings to set how long it waits and whether it asks you to sign in?",
-                Text, MessageBoxButtons.YesNo, MessageBoxIcon.Information);
-            if (open == DialogResult.Yes) Process.Start("control.exe", "desk.cpl,,@screensaver");
+            MessageBox.Show(this,
+                "Installed as \"Living Marine Aquarium 2 Remake\", and selected as your screensaver.\n\n" +
+                "Windows' Screen Saver Settings opens next: set the wait time and sign-in there. Its Settings... button " +
+                "opens these options again, and the original screensaver is still in the list if you want to switch back." +
+                (note == null ? "" : "\n\n" + note),
+                Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            Installer.OpenWindowsDialog();
             Close();
         }
 
