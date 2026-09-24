@@ -7,7 +7,8 @@
 //   ?phase=0..1        fish viewer: freeze the pose
 //   ?t=<seconds>       freeze animation time (deterministic frames for diffs)
 //   ?size=WxH          fixed canvas size in CSS px, e.g. 1024x768 (the original's mode)
-//   ?clean=1           hide all UI (reference comparisons)
+//   ?clean=1           hide all UI and play no sound (reference comparisons)
+//   ?sound=0 / ?volume=<dB>   ambient loop off / its level (see audio.ts)
 //
 // window.lma2 exposes load state for automated checks (agent-browser eval).
 
@@ -17,6 +18,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { type FishEntry, type FishModel, loadFish } from "./fish.ts";
 import { loadScene, type SceneModel } from "./scene.ts";
+import { ambience } from "./audio.ts";
 import { Tank } from "./tank.ts";
 
 interface Manifest {
@@ -141,6 +143,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   const label = document.createElement("label");
   label.append("Scene ", select);
   panel.append(label);
+  if (params.get("clean") !== "1" && frozenT === null) ambience(ASSETS + "common/Sound_undwater.ogg", params, panel);
 
   async function show(id: string): Promise<void> {
     status.ready = false;
