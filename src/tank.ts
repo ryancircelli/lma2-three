@@ -312,6 +312,8 @@ export class Tank {
   readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 20000);
   /** The creature list (0x720): fish, leaders and sea horses; re-sorted far to near every frame. */
   private fish: Fish[] = [];
+  /** The same creatures in creation order (stable slots for probe()). */
+  private roster: Fish[] = [];
   private crabs: Crab[] = [];
   private stars: Star[] = [];
   private models = new Map<string, FishModel>();
@@ -524,6 +526,7 @@ export class Tank {
       });
     }
     this.fish.push(f);
+    this.roster.push(f);
     if (this.data) this.spawn(f);
     return f;
   }
@@ -1263,7 +1266,7 @@ export class Tank {
     const v = new THREE.Vector3();
     const out: { species: string; front: boolean; x0: number; y0: number; x1: number; y1: number }[] = [];
     const all: [string, boolean, THREE.Object3D][] = [
-      ...this.fish.filter((f) => f.holder).map((f) => [f.species, f.front, f.holder!] as [string, boolean, THREE.Object3D]),
+      ...this.roster.filter((f) => f.holder).map((f) => [f.species, f.front, f.holder!] as [string, boolean, THREE.Object3D]),
       ...this.crabs.map((c) => ["anemone-crab", true, c.holder] as [string, boolean, THREE.Object3D]),
       ...this.stars.map((s) => ["sea-star", true, s.holder] as [string, boolean, THREE.Object3D]),
     ];
@@ -1292,6 +1295,7 @@ export class Tank {
     for (const m of this.models.values()) m.dispose();
     this.models.clear();
     this.fish = [];
+    this.roster = [];
     this.crabs = [];
     this.stars = [];
     for (const s of [this.scene, this.behind, this.floor, this.glass]) {
