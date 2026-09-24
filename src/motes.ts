@@ -71,20 +71,106 @@ function coin(id: number, frame: number): boolean {
   return (h & 1) === 1;
 }
 
-export class Motes {
-  /** Goes in the near scene, last (see main.ts). */
-  readonly object: THREE.Points;
-  enabled: boolean;
-  private readonly geometry = new THREE.BufferGeometry();
-  private readonly material: THREE.ShaderMaterial;
+/** One mote to draw, in .X space. */
+export interface MoteSprite {
+  x: number;
+  y: number;
+  z: number;
+  size: number; // quad side, world units
+  white: boolean; // TFACTOR white this frame (twinkle)
+  alpha: number; // TFACTOR alpha: fade in / flicker / fade out
+  fog: number; // D3D fog factor, 1 = none
+}
+
+/**
+ * The mote system alone - no three.js objects, so it can be checked offline.
+ * Advanced in fixed steps, so the state at t is the same for any frame rate
+ * or a frozen ?t=.
+ */
+export class MoteSim {
   private box = new THREE.Box3();
   private motes: Mote[] = [];
   private rand = msvcRand(1);
   private seed = 0;
   private nextId = 0;
   private simT = 0; // simulated up to here
-  private nextSpawn = 0; // timer spawns (after the first MIN)
-  private ready = false;
+  private nextSpawn = 0; // timer spawns (once there are MIN)
+  ready = false;
+
+  setScene(id: string, box: THREE.Box3): void {
+    this.box.copy(box);
+    this.seed = Number(id) || 0;
+    this.ready = true;
+    this.reset();
+  }
+
+  private reset(): void {
+    this.rand = msvcRand((0x51ed27 + this.seed * 7919) >>> 0);
+    this.motes = [];
+    this.nextId = 0;
+    this.simT = 0;
+    this.nextSpawn = 0;
+  }
+
+  /** A random point of the mote box on a tenths grid: x across the full width,
+   * y from min.y + 0.2H to max.y, z in the front half (min.z .. min.z + depth/2). */
+  private point(): THREE.Vector3 {
+    const { min, max } = this.box;
+    const f = () => (this.rand() % 11) / 10; // tenths, 0..1 [inferred: whether 1.0 is included]
+    const H = max.y - min.y, D = max.z - min.z;
+    return new THREE.Vector3(min.x + f() * (max.x - min.x), min.y + 0.2 * H + f() * 0.8 * H, min.z + f() * 0.5 * D);
+  }
+
+  private spawn(u: number): void {
+    const spd = 1 + 0.1 * (this.rand() % 10);
+    const size = 0.5 + 0.05 * (this.rand() % 10);
+    this.motes.push({ id: this.nextId++, a: this.point(), b: this.point(), u, rate: 0.02 * spd, size });
+  }
+
+  private step(dt: number): void {
+    for (const m of this.motes) m.u += dt * m.rate;
+    this.motes = this.motes.filter((m) => m.u < 1);
+    if (this.motes.length < MIN) {
+      this.spawn(0.2); // one per frame while fewer than 10
+      this.nextSpawn = this.simT + (this.rand() % 5);
+    } else if (this.simT >= this.nextSpawn) {
+      if (this.motes.length < MAX) this.spawn(0);
+      this.nextSpawn = this.simT + (this.rand() % 5);
+    }
+    this.simT += dt;
+  }
+
+  /** Every live mote at time t. */
+  sprites(t: number, out: (s: MoteSprite) => void): void {
+    if (!this.ready) return;
+    if (t < this.simT - STEP) this.reset();
+    while (this.simT + STEP <= t) this.step(STEP);
+    const eyeZ = this.box.min.z - EYE_BACK;
+    const frame = Math.floor(t * 60);
+    const p = new THREE.Vector3();
+    for (const m of this.motes) {
+      p.lerpVectors(m.a, m.b, m.u);
+      const alpha = m.u < 0.1 ? m.u / 0.1 : m.u > 0.9 ? (1 - m.u) / 0.1 : 0.9 + 0.1 * Math.abs(Math.sin(100 * m.u));
+      out({
+        x: p.x,
+        y: p.y,
+        z: p.z,
+        size: QUAD * m.size,
+        white: coin(m.id, frame), // TFACTOR white on a random half of frames, else black
+        alpha,
+        fog: THREE.MathUtils.clamp((FOG_END - (p.z - eyeZ)) / FOG_END, 0, 1),
+      });
+    }
+  }
+}
+
+export class Motes {
+  /** Goes in the pass after the creatures (effects.ts). */
+  readonly object: THREE.Points;
+  enabled: boolean;
+  private readonly sim = new MoteSim();
+  private readonly geometry = new THREE.BufferGeometry();
+  private readonly material: THREE.ShaderMaterial;
 
   constructor(assetsUrl: string, enabled = true) {
     this.enabled = enabled;
@@ -112,10 +198,7 @@ export class Motes {
 
   /** Switch scene: `box` is the scene box (scenebox.ts), in .X space. */
   setScene(id: string, box: THREE.Box3): void {
-    this.box.copy(box);
-    this.seed = Number(id) || 0;
-    this.ready = true;
-    this.reset();
+    this.sim.setScene(id, box);
   }
 
   /** Drawing-buffer pixels per world unit (the camera's scale). */
@@ -123,65 +206,22 @@ export class Motes {
     this.material.uniforms.pxPerWorld.value = pxPerWorld;
   }
 
-  private reset(): void {
-    this.rand = msvcRand((0x51ed27 + this.seed * 7919) >>> 0);
-    this.motes = [];
-    this.nextId = 0;
-    this.simT = 0;
-    this.nextSpawn = 0;
-  }
-
-  /** A random point of the mote box on a tenths grid: x across the full width,
-   * y from min.y + 0.2H to max.y, z in the front half (min.z .. min.z + depth/2). */
-  private point(): THREE.Vector3 {
-    const { min, max } = this.box;
-    const f = () => (this.rand() % 11) / 10; // tenths, 0..1 [inferred: grid endpoints]
-    const H = max.y - min.y, D = max.z - min.z;
-    return new THREE.Vector3(min.x + f() * (max.x - min.x), min.y + 0.2 * H + f() * 0.8 * H, min.z + f() * 0.5 * D);
-  }
-
-  private spawn(u: number): void {
-    const spd = 1 + 0.1 * (this.rand() % 10);
-    const size = 0.5 + 0.05 * (this.rand() % 10);
-    this.motes.push({ id: this.nextId++, a: this.point(), b: this.point(), u, rate: 0.02 * spd, size });
-  }
-
-  private step(dt: number): void {
-    for (const m of this.motes) m.u += dt * m.rate;
-    this.motes = this.motes.filter((m) => m.u < 1);
-    if (this.motes.length < MIN) {
-      this.spawn(0.2); // one per frame while fewer than 10
-      this.nextSpawn = this.simT + (this.rand() % 5);
-    } else if (this.simT >= this.nextSpawn) {
-      if (this.motes.length < MAX) this.spawn(0);
-      this.nextSpawn = this.simT + (this.rand() % 5);
-    }
-    this.simT += dt;
-  }
-
   update(t: number): void {
-    this.object.visible = this.enabled && this.ready;
+    this.object.visible = this.enabled && this.sim.ready;
     if (!this.object.visible) return;
-    if (t < this.simT - STEP) this.reset();
-    while (this.simT + STEP <= t) this.step(STEP);
-
     const pos = this.geometry.getAttribute("position") as THREE.BufferAttribute;
     const size = this.geometry.getAttribute("size") as THREE.BufferAttribute;
     const tint = this.geometry.getAttribute("tint") as THREE.BufferAttribute;
     const fog = this.geometry.getAttribute("fog") as THREE.BufferAttribute;
-    const eyeZ = this.box.min.z - EYE_BACK;
-    const frame = Math.floor(t * 60);
-    const p = new THREE.Vector3();
-    this.motes.forEach((m, i) => {
-      p.lerpVectors(m.a, m.b, m.u);
-      pos.setXYZ(i, p.x, p.y, -p.z); // .X space is mirrored into three.js
-      size.setX(i, QUAD * m.size);
-      const alpha = m.u < 0.1 ? m.u / 0.1 : m.u > 0.9 ? (1 - m.u) / 0.1 : 0.9 + 0.1 * Math.abs(Math.sin(100 * m.u));
-      const w = coin(m.id, frame) ? 1 : 0; // TFACTOR white on a random half of frames, else black
-      tint.setXYZW(i, w, w, w, alpha);
-      fog.setX(i, THREE.MathUtils.clamp((FOG_END - (p.z - eyeZ)) / FOG_END, 0, 1));
+    let i = 0;
+    this.sim.sprites(t, (s) => {
+      pos.setXYZ(i, s.x, s.y, -s.z); // .X space mirrored into three.js (this scene has no mirroring root)
+      size.setX(i, s.size);
+      const w = s.white ? 1 : 0;
+      tint.setXYZW(i, w, w, w, s.alpha);
+      fog.setX(i++, s.fog);
     });
-    this.geometry.setDrawRange(0, this.motes.length);
+    this.geometry.setDrawRange(0, i);
     for (const a of [pos, size, tint, fog]) a.needsUpdate = true;
   }
 

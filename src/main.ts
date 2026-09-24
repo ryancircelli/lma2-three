@@ -145,7 +145,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
 
   const tank = new Tank();
   const nearScene = new THREE.Scene(); // billboards in front of the fish
-  const effects = new Effects(ASSETS, params, scene, nearScene); // --- effects (see effects.ts for the layering)
+  const effects = new Effects(ASSETS, params, nearScene); // --- effects (see effects.ts for the layering)
   if (params.get("school") === "0") tank.schooling = false;
   renderer.autoClear = false;
 
@@ -177,7 +177,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     scene.background = model.clearColor;
     scene.add(model.object);
     nearScene.add(model.near);
-    await effects.setScene(id, ASSETS, model.object); // --- effects
+    await effects.setScene(id, ASSETS, model); // --- effects
     fit();
     done(`scene-${id}`, `Scene ${id} · ${tank.count} creatures`);
   }

@@ -195,7 +195,7 @@ export class Bubbles {
     const size = this.geometry.getAttribute("size") as THREE.BufferAttribute;
     let v = 0;
     this.sim.sprites(t, (s) => {
-      pos.setXYZ(v, s.x, s.y, -s.z); // .X space is mirrored into three.js
+      pos.setXYZ(v, s.x, s.y, s.z); // .X space: the parent group (SceneModel.front) mirrors z
       size.setX(v++, s.size);
     });
     this.geometry.setDrawRange(0, v);

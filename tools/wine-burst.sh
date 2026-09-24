@@ -12,6 +12,9 @@
 # LMA2_PARAMS="foreground=0 background=0 plantsmoving=0" sets any other
 # <name value="N"> settings the same way.
 #
+# <volume> is left as installed (1): it drives the LIGHT RAYS, not the sound
+# (docs/original-logic.md 5.1). Pass volume=0 to capture without rays.
+#
 # LMA2_STALL="0.4 1.5" freezes the app (SIGSTOP) for 0.4 s every 1.5 s during
 # the burst - a test of whether its animation is time-based (things jump after
 # a stall) or per-frame (they carry on as if nothing happened). Only processes
@@ -47,7 +50,6 @@ sed -e "s/<index value=\"[0-9]*\"/<index value=\"$scene\"/" \
     -e "s/<bubles value=\"[0-9]*\"/<bubles value=\"$bubles\"/" \
     -e "s/<water value=\"[0-9]*\"/<water value=\"$water\"/" \
     -e 's/<sound value="[0-9]*"/<sound value="0"/' \
-    -e 's/<volume value="[0-9]*"/<volume value="0"/' \
     -e "$fishexpr" "${extra[@]}" \
     "$APP_DIR/settings.base.xml" > "$APP_DIR/settings.xml"
 
