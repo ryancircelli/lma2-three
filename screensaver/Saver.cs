@@ -256,7 +256,10 @@ namespace Lma2Saver
                 status = await core.ExecuteScriptAsync("JSON.stringify(window.lma2 || null)");
                 if (status.Contains("\\\"ready\\\":true")) break;
             }
-            await Task.Delay(3000); // textures still arriving after ready (see main.ts)
+            // "ready" first turns true when the scene is up, before the creatures
+            // arrive, and textures can still be loading: settle, then re-read.
+            await Task.Delay(3000);
+            status = await core.ExecuteScriptAsync("JSON.stringify(window.lma2 || null)");
             using (var png = File.Create(Path.Combine(testDir, "selftest.png")))
                 await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, png);
             File.WriteAllText(Path.Combine(testDir, "status.json"),
