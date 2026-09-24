@@ -155,10 +155,25 @@ function blobs(img: Img, f: number, t: number): Blob[] {
 
 const seq = await frames(seqDir);
 const all: Blob[][] = [];
+// Fast grabs outpace the app (5-12 fps under Wine): drop repeats of the same
+// render, so every frame kept is a new render, timed by its first grab.
+let prev: Uint8Array | null = null, repeats = 0;
+const same = (a: Uint8Array, b: Uint8Array) => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 7) if (a[i] !== b[i]) return false;
+  return true;
+};
 for (let f = 0; f < seq.files.length; f++) {
   const t = seq.times.length ? seq.times[f] - seq.times[0] : f / 30;
-  all.push(blobs(await load(seq.files[f]), f, t));
+  const img = await load(seq.files[f]);
+  if (prev && same(prev, img.px)) {
+    repeats++;
+    continue;
+  }
+  prev = img.px;
+  all.push(blobs(img, f, t));
 }
+if (repeats) console.log(`${repeats} repeated grabs dropped; ${all.length} distinct renders`);
 
 // --- linking -------------------------------------------------------------------
 const colourDist = (a: Blob, b: Blob) => Math.hypot(a.rgb[0] - b.rgb[0], a.rgb[1] - b.rgb[1], a.rgb[2] - b.rgb[2]);
@@ -261,4 +276,26 @@ console.log(
 console.log(
   `blob w p10/50/90/max ${summary.width.p10}/${summary.width.p50}/${summary.width.p90}/${summary.width.max}  h ${summary.height.p10}/${summary.height.p50}/${summary.height.p90}/${summary.height.max}`,
 );
+// Time-based or frame-based motion? Displacement of a creature between
+// consecutive distinct renders, against the time between them: time-based
+// motion gives a constant px/s; frame-based a constant px/frame.
+{
+  const bins: { lo: number; hi: number; d: number[]; v: number[] }[] = [
+    [0, 0.12], [0.12, 0.2], [0.2, 0.3], [0.3, 0.5], [0.5, 9],
+  ].map(([lo, hi]) => ({ lo, hi, d: [], v: [] }));
+  for (const tr of good) {
+    for (let i = 1; i < tr.length; i++) {
+      if (tr[i].f === tr[i - 1].f) continue;
+      const dt = tr[i].t - tr[i - 1].t, d = Math.hypot(tr[i].cx - tr[i - 1].cx, tr[i].cy - tr[i - 1].cy);
+      if (d < 1.5) continue; // resting creatures
+      const bin = bins.find((b) => dt >= b.lo && dt < b.hi);
+      bin?.d.push(d);
+      bin?.v.push(d / dt);
+    }
+  }
+  console.log(
+    "render gap -> median px/step, px/s: " +
+      bins.filter((b) => b.d.length >= 5).map((b) => `${b.lo}-${b.hi}s n=${b.d.length}: ${fmt(q(b.d, 0.5), 1)}px ${fmt(q(b.v, 0.5))}px/s`).join(" | "),
+  );
+}
 if (args.json) await Deno.writeTextFile(args.json, JSON.stringify({ summary, tracks: good, frames: all }, null, 0));

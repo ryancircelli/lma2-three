@@ -37,9 +37,23 @@ export interface FishEntry {
   behaviour: Record<string, number>;
 }
 
+/** Per-frame inputs of the original's swim deformation (docs/original-logic.md 3.10). */
+export interface SwimPose {
+  /** t + the fish's time offset, seconds. */
+  tt: number;
+  /** Fin phase: starts at the time offset, gains 2*step per frame. */
+  ph: number;
+  /** The speed state machine's speedAnim (0..15). */
+  sa: number;
+  /** settings.xml speed * 0.1. */
+  speed: number;
+}
+
 export interface FishInstance {
   object: THREE.Object3D;
   setPhase(phase: number): void;
+  /** Swimming fish only: the original's vertex animation for this frame. */
+  swim?(p: SwimPose): void;
 }
 
 export interface FishModel {
@@ -135,6 +149,8 @@ export async function loadFish(entry: FishEntry, assetsUrl: string): Promise<Fis
   const setPhase = poser(morph?.morphTargetInfluences ?? []);
   setPhase(0);
 
+  const swimData = kind === "swim" && morph ? prepareSwim(morph) : null;
+
   /**
    * An independent copy for the tank. Geometry, textures and materials are
    * shared with the template (Object3D.clone is shallow for those); morph
@@ -143,9 +159,26 @@ export async function loadFish(entry: FishEntry, assetsUrl: string): Promise<Fis
   function instance(): FishInstance {
     const copy = object.clone(true);
     let weights: number[] = [];
+    let body: THREE.Mesh | null = null;
+    const eyes: THREE.Object3D[] = [];
     copy.traverse((o) => {
-      if (o instanceof THREE.Mesh && o.morphTargetInfluences && o.morphTargetInfluences.length) weights = o.morphTargetInfluences;
+      if (o instanceof THREE.Mesh && o.morphTargetInfluences && o.morphTargetInfluences.length) {
+        weights = o.morphTargetInfluences;
+        body = o;
+      }
+      if (/^(Left|Right)Eye$/.test(o.name)) eyes.push(o);
     });
+    if (swimData && body) {
+      // The swim animation edits vertices on the CPU, as the original does:
+      // this copy gets its own position/normal buffers and no morphing.
+      const m = body as THREE.Mesh;
+      m.geometry = m.geometry.clone();
+      m.geometry.morphAttributes = {};
+      m.morphTargetInfluences = undefined;
+      m.morphTargetDictionary = undefined;
+      m.frustumCulled = false;
+      return { object: copy, setPhase: () => {}, swim: swimDeformer(swimData, m, eyes, instances++) };
+    }
     return { object: copy, setPhase: poser(weights) };
   }
 
@@ -163,4 +196,144 @@ export async function loadFish(entry: FishEntry, assetsUrl: string): Promise<Fis
   }
 
   return { object, kind, radius: sphere.radius, length: size.x, triangles, setPhase, instance, dispose };
+}
+
+// --- the original's swim animation (docs/original-logic.md 3.10) ---------------
+//
+// Each frame the body is rebuilt from the `center` pose, then, in order:
+//   1. tail ripple on the `*_tail*` material subset
+//   2. gills and pectoral fins blended toward `opened` (w > 0) or `closed`
+//      (w < 0) - ONLY those subsets, never the whole body:
+//        gills w = sin(10 ph), fin_left w = sin(25 ph / speed), fin_right w = cos(25 ph / speed)
+//   3. whole-body bend around a vertical axis (the swimming undulation)
+//   4. eyes swivel to random targets, cancelling the bend where they sit
+// All in the mesh's own (.X, left-handed) coordinates, as in the original.
+
+let instances = 0;
+
+interface Range {
+  start: number;
+  count: number;
+}
+
+interface SwimData {
+  pos: Float32Array;
+  nrm: Float32Array;
+  opened: { pos: Float32Array; nrm: Float32Array } | null;
+  closed: { pos: Float32Array; nrm: Float32Array } | null;
+  gills: Range[];
+  finLeft: Range[];
+  finRight: Range[];
+  tail: Range[];
+  tailBox: { minX: number; maxX: number; minY: number; maxY: number };
+}
+
+function prepareSwim(mesh: THREE.Mesh): SwimData {
+  const g = mesh.geometry;
+  const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  const pick = (re: RegExp): Range[] =>
+    g.groups.filter((gr) => re.test(mats[gr.materialIndex ?? 0]?.name ?? "")).map((gr) => ({ start: gr.start, count: gr.count }));
+  const dict = mesh.morphTargetDictionary ?? {};
+  const target = (name: string) => {
+    const i = dict[name];
+    if (i === undefined) return null;
+    return {
+      pos: (g.morphAttributes.position![i] as THREE.BufferAttribute).array as Float32Array,
+      nrm: (g.morphAttributes.normal![i] as THREE.BufferAttribute).array as Float32Array,
+    };
+  };
+  const pos = (g.getAttribute("position") as THREE.BufferAttribute).array as Float32Array;
+  const tail = pick(/_tail/i);
+  const tailBox = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+  for (const r of tail) {
+    for (let v = r.start; v < r.start + r.count; v++) {
+      tailBox.minX = Math.min(tailBox.minX, pos[v * 3]), tailBox.maxX = Math.max(tailBox.maxX, pos[v * 3]);
+      tailBox.minY = Math.min(tailBox.minY, pos[v * 3 + 1]), tailBox.maxY = Math.max(tailBox.maxY, pos[v * 3 + 1]);
+    }
+  }
+  return {
+    pos: pos.slice(),
+    nrm: ((g.getAttribute("normal") as THREE.BufferAttribute).array as Float32Array).slice(),
+    opened: target("opened"),
+    closed: target("closed"),
+    gills: pick(/gills/i),
+    finLeft: pick(/fin_left/i),
+    finRight: pick(/fin_right/i),
+    tail,
+    tailBox,
+  };
+}
+
+function swimDeformer(d: SwimData, mesh: THREE.Mesh, eyes: THREE.Object3D[], seed: number): (p: SwimPose) => void {
+  const posAttr = mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
+  const nrmAttr = mesh.geometry.getAttribute("normal") as THREE.BufferAttribute;
+  const P = posAttr.array as Float32Array, N = nrmAttr.array as Float32Array;
+  const eyeBase = eyes.map((e) => ({ q: e.quaternion.clone(), p: e.position.clone() }));
+  const q = new THREE.Quaternion(), yAxis = new THREE.Vector3(0, 1, 0);
+  // Eye targets: (3 - rand%6) * 0.1 rad, re-chosen every (rand%20)/15 s.
+  let s = (seed * 2654435761 + 12345) >>> 0;
+  const rand = () => (s = (Math.imul(s, 1103515245) + 12345) >>> 0) >>> 16 & 0x7fff;
+  let eyeYaw = 0, eyeNext = -1;
+
+  function blend(ranges: Range[], w: number): void {
+    const t = w > 0 ? d.opened : d.closed;
+    if (!t || w === 0) return;
+    const a = Math.abs(w);
+    for (const r of ranges) {
+      for (let i = r.start * 3; i < (r.start + r.count) * 3; i++) {
+        P[i] = d.pos[i] + (t.pos[i] - d.pos[i]) * a;
+        N[i] = d.nrm[i] + (t.nrm[i] - d.nrm[i]) * a;
+      }
+    }
+  }
+
+  return ({ tt, ph, sa, speed }: SwimPose) => {
+    P.set(d.pos);
+    N.set(d.nrm);
+    // 1. tail ripple
+    const tb = d.tailBox, h = tb.maxY - tb.minY, wx = tb.maxX - tb.minX;
+    if (h > 0 && wx > 0) {
+      for (const r of d.tail) {
+        for (let v = r.start; v < r.start + r.count; v++) {
+          const x = P[v * 3], y = P[v * 3 + 1];
+          const u = (tb.maxX - x) / wx;
+          const dd = u * u * 0.025 * h * Math.sin(3 * (tb.maxY - y) / h + 5 * tt);
+          P[v * 3 + 2] += dd;
+          P[v * 3] += dd / 2;
+          N[v * 3] += dd / 6;
+          N[v * 3 + 2] += dd;
+        }
+      }
+    }
+    // 2. gills and fins
+    blend(d.gills, Math.sin(10 * ph));
+    blend(d.finLeft, Math.sin(25 * ph / speed));
+    blend(d.finRight, Math.cos(25 * ph / speed));
+    // 3. body bend: k = (sa+6) * clamp(-cos(5 tt) (sa+2)/17, -1, 1) / 21, R = 250/k
+    let k = (sa + 6) * THREE.MathUtils.clamp(-Math.cos(5 * tt) * (sa + 2) / 17, -1, 1) / 21;
+    if (Math.abs(k) < 1e-4) k = k < 0 ? -1e-4 : 1e-4;
+    const R = 250 / k;
+    for (let i = 0; i < P.length; i += 3) {
+      const x = P[i], z = P[i + 2], th = x / R, c = Math.cos(th), sn = Math.sin(th);
+      P[i] = sn * (R - z);
+      P[i + 2] = R - c * (R - z);
+      const nx = N[i], nz = N[i + 2];
+      let n0 = nx * c - nz * sn, n1 = N[i + 1], n2 = nx * sn + nz * c;
+      const l = Math.hypot(n0, n1, n2) || 1;
+      n0 /= l, n1 /= l, n2 /= l;
+      N[i] = n0, N[i + 1] = n1, N[i + 2] = n2;
+    }
+    posAttr.needsUpdate = true;
+    nrmAttr.needsUpdate = true;
+    // 4. eyes
+    if (tt >= eyeNext) {
+      eyeYaw = (3 - rand() % 6) * 0.1;
+      eyeNext = tt + (rand() % 20) / 15;
+    }
+    eyes.forEach((e, i) => {
+      const { p, q: q0 } = eyeBase[i], th = p.x / R;
+      e.position.set(Math.sin(th) * (R - p.z), p.y, R - Math.cos(th) * (R - p.z)); // ride the bend
+      e.quaternion.copy(q0).multiply(q.setFromAxisAngle(yAxis, eyeYaw)); // net of the bend, as in the original
+    });
+  };
 }

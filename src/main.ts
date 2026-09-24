@@ -162,6 +162,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     current = model;
     scene.add(model.object);
     nearScene.add(model.near);
+    await tank.setScene(id, ASSETS); // [feat/fish] fish bounds, sea floor, reef line
     fit();
     params.set("scene", id);
     history.replaceState(null, "", `?${params}`);
@@ -177,7 +178,9 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   // ?fish=0 leaves the tank empty, for backdrop comparisons.
   if (params.get("fish") !== "0") {
     try {
-      await tank.populate(manifest.fish, manifest.tank, ASSETS);
+      // [feat/fish] ?all=1: one of every species (to check each one), else the configured tank.
+      const stock = params.get("all") === "1" ? Object.fromEntries(manifest.fish.map((f) => [f.slug, 1])) : manifest.tank;
+      await tank.populate(manifest.fish, stock, ASSETS);
     } catch (e) {
       fail(`fish: ${(e as Error).message}`);
     }
@@ -185,20 +188,30 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     done(`scene-${select.value}`, `Scene ${select.value} · ${tank.count} creatures`);
   }
 
-  // Three passes, because the original composites two projections: the flat
-  // painting (orthographic), the 3D creatures (perspective) in front of it, and
-  // the near billboards (orthographic again) in front of the creatures.
+  // [feat/fish] The original's draw order (docs/original-logic.md 2.2), one
+  // orthographic camera throughout: the Background plane; creatures BEHIND the
+  // foreground plane (z > 0); the rest of the painting (foreground, billboards,
+  // ...); then the crab and sea star, and - depth cleared - creatures in FRONT
+  // of it, over everything; a sea star on the glass last.
+  const drawable = (o: THREE.Object3D) => (o as THREE.Mesh).isMesh || (o as THREE.Points).isPoints || (o as THREE.Sprite).isSprite || (o as THREE.Line).isLine;
+  const paint = (background: boolean) => {
+    scene.traverse((o) => {
+      if (drawable(o)) o.visible = (o.name === "Background") === background;
+    });
+    renderer.render(scene, camera);
+  };
   let last = 0;
   return (t) => {
     current?.update(t);
     if (frozenT === null) tank.update(Math.min(t - last, 0.1));
     last = t;
     renderer.clear();
-    renderer.render(scene, camera);
+    paint(true);
+    tank.renderBehind(renderer);
     renderer.clearDepth();
-    renderer.render(tank.scene, tank.camera);
-    renderer.clearDepth();
+    paint(false);
     renderer.render(nearScene, camera);
+    tank.renderFront(renderer);
   };
 }
 

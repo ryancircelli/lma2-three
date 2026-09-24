@@ -29,11 +29,19 @@ export WINEPREFIX="$PREFIX" WINEARCH=win32 WINEDEBUG="${LMA2_WINEDEBUG:--all}"
 #   LMA2_SCHOOLING=0|1   the <schooling> setting (default: the install's)
 #   LMA2_CROP=WxH+X+Y    capture only this region (faster - fish tracking)
 #   LMA2_EXT=ppm         frame format (ppm writes faster than png)
+#   LMA2_GRAB=fast      grab with tools/xgrab.py (ms per frame, ppm)
+#   LMA2_SECONDS=20     with LMA2_GRAB=fast: poll for this long, keep only new
+#                        renders (each timed by its first appearance)
 #   LMA2_WINEDEBUG=fps   wined3d prints the app's frame rate to stderr
 #   LMA2_TANK="Sea Horse=2,Flame Angel=3"   stock ONLY these species (with fish=1);
 #                        a species missing from settings.xml gets a line added
 EXTRA_SED=(-e 's/x/x/')
 [ -n "${LMA2_SCHOOLING:-}" ] && EXTRA_SED+=(-e "s/<schooling value=\"[0-9]*\"/<schooling value=\"$LMA2_SCHOOLING\"/")
+#   LMA2_BARE=1          no water/bubbles/foreground/background: creatures on
+#                        flat water, rendered many times faster (see notes)
+[ -n "${LMA2_BARE:-}" ] && for _k in water plantsmoving bubles foreground background; do
+  EXTRA_SED+=(-e "s/<$_k value=\"[0-9]*\"/<$_k value=\"0\"/")
+done
 if [ -n "${LMA2_TANK:-}" ]; then
   EXTRA_SED+=(-e 's/<fish value="[1-9][0-9]*"/<fish value="0"/g')
   IFS=',' read -ra _entries <<< "$LMA2_TANK"
@@ -124,6 +132,18 @@ cmd_sequence() {
   outdir="$(realpath -m "$outdir")"
   mkdir -p "$outdir"
   rm -f "$outdir"/f*.png "$outdir"/f*.ppm "$outdir/times.txt"
+  if [ "${LMA2_GRAB:-}" = fast ]; then
+    # Xlib grabs (tools/xgrab.py): milliseconds per frame instead of ~0.7 s.
+    local grab; grab="$(dirname "$(realpath "$0")")/xgrab.py"
+    on_xvfb bash -c '
+      wine "C:\\windows\\'"$SCR_NAME"'" /s & pid=$!
+      sleep '"$delay"'
+      python3 "'"$grab"'" "'"$outdir"'" '"$frames"' '"$interval"' "'"${LMA2_CROP:-}"'" "$pid" "'"${LMA2_SECONDS:-}"'"
+      wineserver -k
+    '
+    echo "scene=$scene caustics=$caustic fish=$fish schooling=${LMA2_SCHOOLING:-install}: $frames fast frames -> $outdir"
+    return
+  fi
   on_xvfb bash -c '
     wine "C:\\windows\\'"$SCR_NAME"'" /s & pid=$!
     sleep '"$delay"'
