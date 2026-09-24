@@ -68,8 +68,14 @@ export interface SceneModel {
   object: THREE.Group;
   /** Near billboards, drawn after (in front of) the fish. */
   near: THREE.Group;
-  /** The painted frame in view space (after the Z mirror); fit the camera to this. */
+  /** The painted frame in view space (after the Z mirror): Background + Foreground. */
   frame: THREE.Box2;
+  /**
+   * X/Y extent of EVERY vertex in mesh.X (Relief, billboards and the `height`
+   * data included) - what the original fits its camera to. Differs from
+   * `frame` in x: the Relief overhangs the painted planes by a few units.
+   */
+  bounds: THREE.Box2;
   /** Animate billboards etc.; `t` in seconds. */
   update(t: number): void;
   dispose(): void;
@@ -162,6 +168,18 @@ export async function loadScene(id: string, assetsUrl: string, opts: SceneOption
     (m.world.elements[14] < NEAR_Z ? near : root).add(obj);
   };
 
+  // The camera's box: all vertices, drawn or not (X/Y are unaffected by the Z mirror).
+  const bounds = new THREE.Box2();
+  {
+    const v = new THREE.Vector3();
+    for (const m of doc.meshes) {
+      for (let i = 0; i < m.positions.length; i += 3) {
+        v.fromArray(m.positions, i).applyMatrix4(m.world);
+        bounds.expandByPoint(new THREE.Vector2(v.x, v.y));
+      }
+    }
+  }
+
   for (const m of doc.meshes) {
     if (!isRenderable(m)) continue;
 
@@ -239,5 +257,5 @@ export async function loadScene(id: string, assetsUrl: string, opts: SceneOption
     });
   }
 
-  return { object: root, near, frame, update, dispose };
+  return { object: root, near, frame, bounds, update, dispose };
 }
