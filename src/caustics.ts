@@ -27,10 +27,11 @@
 //   depth    z test off (decompiled), so where the Relief folds over itself
 //            every up-facing layer adds.
 //
-// THE FISH - an extra additive pass over each creature using the same frame,
-// with UVs from world position: (worldZ*0.01, worldX*0.01), and the ambient
-// set to 0x10101010 (decompiled, FUN_00403660 / FUN_00406050). See
-// applyFishCaustics().
+// THE CREATURES - an extra additive pass over each creature with the same
+// frame, UVs from world position (worldZ, worldX) * scale, lit only by ambient
+// 0x10101010 (decompiled): fish and sea horses at scale 0.01 (causticonfish),
+// crab and sea star at 0.0025, scrolled (caustic). Too faint to measure in the
+// reference (<= ~11 levels). See applyFishCaustics() / applyCreatureCaustics().
 
 // @ts-types="npm:@types/three@0.186.0"
 import * as THREE from "three";
@@ -64,7 +65,8 @@ export function causticClock(t: number): { frame: number; u: number; v: number }
  *   ?caustics=0          off (reef and fish)
  *   ?caustics=uv|normal  analysis renders of the Relief alone, encoded (see shader)
  *   ?causticframe=<0..28>&causticuv=<du>,<dv>   freeze the frame / D3D uv offset
- *   ?causticlight=<k>    override the Relief light */
+ *   ?causticlight=<k>    override the Relief light
+ *   ?causticonfish=0     no caustics on fish;  ?causticfishambient=<a>  exaggerate them (checks) */
 function urlParams(): URLSearchParams {
   return new URLSearchParams(globalThis.location?.search ?? "");
 }
@@ -223,39 +225,55 @@ export function createCaustics(relief: XMesh, sceneId: string, assetsUrl: string
   return { object: obj, update, dispose };
 }
 
+// --- creatures ------------------------------------------------------------------
+
+/** Planar caustic UV scale on creatures, per world unit (decompiled). Two
+ * different code paths, not a disagreement: fish and sea horses (causticonfish,
+ * 0x403660 / 0x406050) use 0.01 = one tile per 100 units; the crab and sea star
+ * (caustic, 0x40a7a0 / 0x420970) use 0.0025 = one tile per 400 units, and
+ * scroll like the Relief. NOT measurable in the reference: with only the
+ * 0x10 ambient lighting it, the pass adds at most ~11 levels (mean ~2.5) - the
+ * B channel of saturated yellow fish pixels is the same with causticonfish on
+ * and off (median 68 vs 70, p90 90 vs 92, ~50k px each). */
+export const CREATURE_CAUSTICS = {
+  fish: { scale: 0.01, scroll: false },
+  floor: { scale: 0.0025, scroll: true },
+} as const;
+
 /**
- * Caustics on a creature (setting `causticonfish`): the original draws an extra
- * ONE/ONE pass over each fish with the current caustic frame, UVs from world
- * position (worldZ*0.01, worldX*0.01) and ambient 0x10101010. For an opaque
- * surface that is the same as adding the term to the fish's own output, which
- * is what this does - in output (framebuffer) space, after colour-space
- * conversion, like the Relief pass.
+ * Caustics on one creature material: the original draws an extra ONE/ONE pass
+ * with the current caustic frame, UVs from world position
+ * (worldZ*scale, worldX*scale) and ambient 0x10101010. For an opaque surface
+ * that equals adding the term to the material's own output, which is what this
+ * does - in framebuffer space, after colour-space conversion, like the Relief.
  *
- * Call once per material (materials shared between instances only need it
- * once). Works on the built-in lit materials (MeshPhongMaterial etc.), morphs
- * included. `world` is the tank's three.js world, whose z is the original's
- * -Z (handedness mirror). The shared clock is advanced by the scene's update().
+ * Works on the built-in lit materials (MeshPhongMaterial etc.), morph targets
+ * included; call once per material (instances sharing it are covered). World
+ * is the tank's three.js world: X as the original's, Z mirrored. The shared
+ * clock is advanced by the scene's update().
  *
- * CALIBRATE: only the ambient term is known. If the pass is also lit by the
- * scene's lights, pass `light` > 0 to add a straight-down Lambert term like
- * the Relief's.
+ * CALIBRATE: each fish picks its frame by `t + timeOffset` (its own clock);
+ * here all share the scene's frame. `light` > 0 adds a straight-down Lambert
+ * term, if the pass turns out to be lit by more than the ambient.
  */
-export function applyFishCaustics(material: THREE.Material, assetsUrl: string, opts: { light?: number } = {}): void {
-  if (urlParams().get("caustics") === "0") return;
+export function applyFishCaustics(
+  material: THREE.Material,
+  assetsUrl: string,
+  opts: { scale?: number; scroll?: boolean; light?: number } = {},
+): void {
   causticTextures(assetsUrl);
-  const light = opts.light ?? 0;
+  const { scale = CREATURE_CAUSTICS.fish.scale, scroll = false, light = 0 } = opts;
   const prev = material.onBeforeCompile;
   material.onBeforeCompile = (shader, renderer) => {
-    prev?.call(material, shader, renderer);
+    prev.call(material, shader, renderer);
     Object.assign(shader.uniforms, shared, {
-      causticAmbient: { value: FISH_CAUSTIC_AMBIENT },
+      causticAmbient: { value: Number(urlParams().get("causticfishambient") ?? FISH_CAUSTIC_AMBIENT) },
       causticLight: { value: light },
+      causticScale: { value: scale },
+      causticScroll: { value: scroll ? 1 : 0 },
     });
     shader.vertexShader = shader.vertexShader
-      .replace(
-        "#include <common>",
-        "#include <common>\nvarying vec3 vCausticWorld;\nvarying vec3 vCausticNormal;",
-      )
+      .replace("#include <common>", "#include <common>\nvarying vec3 vCausticWorld;\nvarying vec3 vCausticNormal;")
       .replace(
         "#include <project_vertex>",
         "#include <project_vertex>\nvCausticWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvCausticNormal = normalize(mat3(modelMatrix) * objectNormal);",
@@ -266,8 +284,7 @@ export function applyFishCaustics(material: THREE.Material, assetsUrl: string, o
         `#include <common>
         uniform sampler2D causticMap;
         uniform vec2 causticOffset;
-        uniform float causticAmbient;
-        uniform float causticLight;
+        uniform float causticAmbient, causticLight, causticScale, causticScroll;
         varying vec3 vCausticWorld;
         varying vec3 vCausticNormal;
         ${SAMPLE_D3D}`,
@@ -276,14 +293,38 @@ export function applyFishCaustics(material: THREE.Material, assetsUrl: string, o
         "#include <colorspace_fragment>",
         `#include <colorspace_fragment>
         {
-          // The original's world: X as ours, Z mirrored. No scroll on this pass.
-          vec2 d3dUv = vec2(-vCausticWorld.z, vCausticWorld.x) * 0.01;
+          // Original world: X as ours, Z mirrored.
+          vec2 d3dUv = vec2(-vCausticWorld.z, vCausticWorld.x) * causticScale + causticOffset * causticScroll;
           float lit = causticAmbient + causticLight * max(normalize(vCausticNormal).y, 0.0);
           gl_FragColor.rgb += causticSample(d3dUv) * lit;
         }`,
       );
   };
   const key = material.customProgramCacheKey.bind(material);
-  material.customProgramCacheKey = () => `${key()}|caustics`;
+  material.customProgramCacheKey = () => `${key()}|caustics:${scale}:${scroll}`;
   material.needsUpdate = true;
 }
+
+/**
+ * Give a whole creature model its caustic pass, by kind: the crab (`cycle`)
+ * and sea star (`static`) get the floor variant when `caustic` is on, every
+ * other creature the fish variant when `causticonfish` is on. URL: ?caustics=0
+ * turns both off, ?causticonfish=0 only the fish.
+ */
+export function applyCreatureCaustics(object: THREE.Object3D, kind: string, assetsUrl: string): void {
+  const p = urlParams();
+  if (p.get("caustics") === "0") return;
+  const floor = kind === "cycle" || kind === "static";
+  if (!floor && p.get("causticonfish") === "0") return;
+  const opts = floor ? CREATURE_CAUSTICS.floor : CREATURE_CAUSTICS.fish;
+  const done = new Set<THREE.Material>();
+  object.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (done.has(m)) continue;
+      done.add(m);
+      applyFishCaustics(m, assetsUrl, opts);
+    }
+  });
+}
+
