@@ -97,23 +97,19 @@ a gesture, so it starts on the first click or key press. **M** or the panel butt
 `?sound=0` disables it; `?volume=<dB>` sets the level, default **-12 dB** (the bubbling is loud at the original level; the
 install was patched down by the same amount). `?clean=1` and `?t=` captures are silent.
 
-## Deploy (private, password-protected)
+## Deploy (public)
 
 Every push to `main` runs `.github/workflows/deploy.yml`, which type-checks, tests, builds and stages `_site/`, then deploys it with
-wrangler to **https://lma2-three.ryancircelli.workers.dev**.
+wrangler as Workers static assets to **https://lma2.ryancircelli.com** (also https://lma2-three.ryancircelli.workers.dev).
 
-- **Password gate**: `worker/index.ts` runs in front of every request (`assets.run_worker_first` in `wrangler.jsonc`). Without a
-  valid session cookie it shows a password-only login page; the right password (the Worker secret `SITE_PASSWORD`) sets an HttpOnly
-  cookie for 30 days. The cookie is an HMAC of the password, so changing the password signs everyone out. With no secret set, it
-  serves nothing (503).
-- **Where the secrets live** (none are in the repo):
-  - GitHub Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. The token is scoped to this one account, with only
-    *Workers Scripts: Edit* and *Account Settings: Read*. It is named "lma2-three deploy (GitHub Actions)" in the Cloudflare dashboard.
-  - `SITE_PASSWORD` is stored on the Worker itself (Cloudflare secret) and persists across deploys. A local copy is in `.dev.vars`,
-    which is gitignored and also used by `wrangler dev`.
-- **Change the password**: `npx wrangler secret put SITE_PASSWORD` (or in the dashboard: Workers → lma2-three → Settings →
-  Variables and Secrets), then update `.dev.vars`.
+- The site is public: no password. (Until 2026-09-24 a Worker gate required one; it was removed along with its secret.)
+- The custom domain is attached to the `lma2-three` Worker in Cloudflare (Workers -> lma2-three -> Domains), not in
+  `wrangler.jsonc`, so the deploy token needs no zone permissions and deploys never touch the domain.
+- **Secrets** (none in the repo): GitHub Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. The token is scoped
+  to this one account with only *Workers Scripts: Edit* and *Account Settings: Read*; it is named "lma2-three deploy (GitHub
+  Actions)" in the Cloudflare dashboard.
 - Without `CLOUDFLARE_API_TOKEN`, CI still builds and tests but skips the deploy.
+
 ## Notes
 
 - If the install's `COMMON` archive has `data.fat.bak-*` / `data.bin.bak-*` backups, `extract` uses the earliest pair, so the web

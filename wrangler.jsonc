@@ -1,16 +1,13 @@
-// Cloudflare Worker: a password gate (worker/index.ts) in front of the static
-// site in _site/. Deployed by .github/workflows/deploy.yml.
+// Cloudflare Workers static assets: the site in _site/, served publicly.
+// Deployed by .github/workflows/deploy.yml.
+//
+// The custom domain lma2.ryancircelli.com is attached to this Worker in the
+// Cloudflare dashboard/API (Workers -> lma2-three -> Domains), not here, so the
+// deploy token needs no zone permissions. Deploys don't touch it.
 {
   "name": "lma2-three",
-  "main": "worker/index.ts",
   "compatibility_date": "2026-09-01",
-  "assets": {
-    "directory": "./_site",
-    "binding": "ASSETS",
-    // Essential: without this, Cloudflare serves any file that matches a static
-    // asset directly, WITHOUT running the Worker - bypassing the password.
-    "run_worker_first": true
-  },
+  "assets": { "directory": "./_site" },
   "workers_dev": true,
   // Per-version preview URLs are extra hostnames; keep them off.
   "preview_urls": false
