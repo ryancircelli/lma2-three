@@ -20,6 +20,7 @@ import { type FishEntry, type FishModel, loadFish } from "./fish.ts";
 import { ambience } from "./audio.ts";
 import { loadScene, nextRotationScene, type SceneModel } from "./scene.ts";
 import { Tank } from "./tank.ts";
+import { Effects } from "./effects.ts"; // --- effects: bubbles, light rays, light motes
 
 interface Manifest {
   fish: FishEntry[];
@@ -138,11 +139,13 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     camera.updateProjectionMatrix();
     // The fish camera sees exactly this view at the painting's plane.
     tank.setView(cx, cy, hw, hh);
+    effects.setScale(renderer.getDrawingBufferSize(new THREE.Vector2()).y / (2 * hh)); // --- effects
   }
   new ResizeObserver(fit).observe(canvas);
 
   const tank = new Tank();
   const nearScene = new THREE.Scene(); // billboards in front of the fish
+  const effects = new Effects(ASSETS, params, nearScene); // --- effects (see effects.ts for the layering)
   if (params.get("school") === "0") tank.schooling = false;
   renderer.autoClear = false;
 
@@ -175,6 +178,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     scene.add(model.object);
     nearScene.add(model.near);
     await tank.setScene(id, ASSETS); // [feat/fish] fish bounds, sea floor, reef line
+    await effects.setScene(id, ASSETS, model); // --- effects
     fit();
     done(`scene-${id}`, `Scene ${id} · ${tank.count} creatures`);
   }
@@ -211,7 +215,9 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   // orthographic camera throughout: scene pass 0 (`back`); creatures BEHIND
   // the foreground plane (z > 0); scene pass 1 (`front`: billboards,
   // Foreground, caustics); the crab and sea star; depth cleared, creatures in
-  // FRONT of it, over everything; a sea star on the glass last (tank.ts).
+  // FRONT of it, over everything; light motes; depth cleared, a sea star on
+  // the glass last. Depth is cleared only where the original clears it:
+  // bubbles (pass 1) write depth and so hide back creatures behind them.
   const paint = (pass: 0 | 1) => {
     if (current) {
       current.back.visible = pass === 0;
@@ -225,15 +231,19 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   let last = 0;
   return (t) => {
     current?.update(t);
+    effects.update(t); // --- effects
     if (frozenT === null) tank.update(Math.min(t - last, 0.1));
     last = t;
     renderer.clear();
-    paint(0);
-    tank.renderBehind(renderer);
+    paint(0); // Z off: writes no depth
+    tank.renderBehind(renderer); // Z on
+    paint(1); // bubbles test/write depth; the rest of the painting does not
+    tank.renderFloor(renderer); // crab, sea star (floor variant)
     renderer.clearDepth();
-    paint(1);
-    renderer.render(nearScene, camera); // (empty since feat/scenes)
-    tank.renderFront(renderer);
+    tank.renderFront(renderer); // front creatures
+    renderer.render(nearScene, camera); // light motes (--- effects)
+    renderer.clearDepth();
+    tank.renderGlass(renderer); // sea star on the glass
   };
 }
 

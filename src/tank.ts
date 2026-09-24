@@ -892,20 +892,25 @@ export class Tank {
 
   /** The creatures behind the foreground painting: draw right after the background plane. */
   renderBehind(renderer: THREE.WebGLRenderer): void {
+    // The original draws scene pass 0 with Z off: whatever it left in our
+    // depth buffer must not hide the creatures.
     renderer.clearDepth();
     renderer.render(this.behind, this.camera);
   }
 
-  /** Crab and sea star, then (Z cleared) the front creatures, then a sea star on the glass. */
-  renderFront(renderer: THREE.WebGLRenderer): void {
-    renderer.clearDepth();
+  /** Crab and sea star (floor variant): after scene pass 1, Z on, NO clear (bubbles' depth counts). */
+  renderFloor(renderer: THREE.WebGLRenderer): void {
     renderer.render(this.floor, this.camera);
-    renderer.clearDepth();
+  }
+
+  /** The creatures in front of the foreground plane. The caller clears depth first. */
+  renderFront(renderer: THREE.WebGLRenderer): void {
     renderer.render(this.scene, this.camera);
-    if (this.stars.some((s) => s.glass)) {
-      renderer.clearDepth();
-      renderer.render(this.glass, this.camera);
-    }
+  }
+
+  /** A sea star on the front glass, drawn last. The caller clears depth first. */
+  renderGlass(renderer: THREE.WebGLRenderer): void {
+    if (this.stars.some((s) => s.glass)) renderer.render(this.glass, this.camera);
   }
 
   /**
