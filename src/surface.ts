@@ -40,13 +40,15 @@ const SCALE = { x: 19, y: 15, z: 18 };
 const DROP_Y = 200; // below the scene bbox's top
 
 // --- CALIBRATE ---------------------------------------------------------------
-/** Vertex lighting: diffuse = AMBIENT + LIGHT * (N . down), per channel,
- * clamped to 1. The decompile shows ambient + one directional light; AMBIENT
- * 0x80 is inferred, LIGHT fitted to the measured per-row gain (rms 0.048 with
- * fog). The data cannot separate this from a flat ~0.93: N . down only spans
- * 0.80-0.99 across the band. */
-const AMBIENT = 128 / 255;
-const LIGHT = 0.5;
+/** The vertex diffuse (lit, white material) while the surface draws. The
+ * decompile leaves it [inferred] (ambient 0x80 + L1 was the guess). Measured
+ * frame-matched against the reference (same caustics frame, screenshots/
+ * rowratio.py): with 0.5 + 0.5 (N . down) ours was 11% too dim at the top and
+ * right at the fold, i.e. the reference is full-bright at every row - the
+ * lighting saturates (plausibly the painted planes' 0xFFFFFFFF ambient state
+ * still set from the previous frame). So: 1, with the fog doing all the fading.
+ * ?surfshade=<v> overrides (calibration). */
+const DIFFUSE = Number(new URLSearchParams(globalThis.location?.search ?? "").get("surfshade") ?? 1);
 // ------------------------------------------------------------------------------
 
 /** Linear fog to black, as the original sets it up from the scene depth
@@ -56,29 +58,28 @@ function fogFactor(zEye: number, depth: number): number {
   return Math.min(1, Math.max(0, (end - zEye) / (end - start)));
 }
 
+// Per-vertex fog factor, interpolated like D3D's vertex fog.
 const vertexShader = /* glsl */ `
-  attribute float shade;
   attribute float fog;
   varying vec2 vUv;
-  varying float vShade;
   varying float vFog;
   void main() {
     vUv = uv;
-    vShade = shade;
     vFog = fog;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
 
 // Raw 8-bit values in, raw values out: D3D blended in gamma space, and so does
-// this (no colour-space conversion on the texture or the output).
+// this (no colour-space conversion on the texture or the output). Fog to black
+// = lerp(black, colour, f) = colour * f.
 const fragmentShader = /* glsl */ `
   uniform sampler2D map;
+  uniform float diffuse;
   varying vec2 vUv;
-  varying float vShade;
   varying float vFog;
   void main() {
-    gl_FragColor = vec4(texture2D(map, vUv).rgb * vShade * vFog, 1.0);
+    gl_FragColor = vec4(texture2D(map, vUv).rgb * diffuse * vFog, 1.0);
   }
 `;
 
@@ -92,7 +93,7 @@ export class WaterSurface {
   private constructor(private readonly src: XMesh, private readonly textures: THREE.Texture[]) {
     this.object.name = "water-surface";
     this.material = new THREE.ShaderMaterial({
-      uniforms: { map: { value: textures[0] } },
+      uniforms: { map: { value: textures[0] }, diffuse: { value: DIFFUSE } },
       vertexShader,
       fragmentShader,
       // Opaque-list material (drawn before the transparent painting) with
@@ -114,7 +115,7 @@ export class WaterSurface {
 
   static async load(assetsUrl: string): Promise<WaterSurface> {
     const doc = await loadXDoc(`${assetsUrl}common/watersurface.X`);
-    const src = doc.meshes.find((m) => m.faces.length && m.uvs && m.normals);
+    const src = doc.meshes.find((m) => m.faces.length && m.uvs);
     if (!src) throw new Error("watersurface.X: no textured mesh");
     const loader = new THREE.TextureLoader();
     const textures = await Promise.all(
@@ -145,26 +146,18 @@ export class WaterSurface {
     const n = m.positions.length / 3;
     const depth = box.max.z - box.min.z;
     const eyeZ = box.min.z - 2000; // the original's eye: 2000 in front of the bbox
-    const pos = new Float32Array(n * 3), uv = new Float32Array(n * 2);
-    const shade = new Float32Array(n), fog = new Float32Array(n);
-    // Normals are indexed separately in .X; this mesh's normal faces match its
-    // position faces corner for corner, so map them through the faces.
-    const normalOf = new Int32Array(n).fill(-1);
-    m.faces.forEach((f, fi) => f.forEach((vi, c) => (normalOf[vi] = m.normalFaces?.[fi]?.[c] ?? vi)));
+    const pos = new Float32Array(n * 3), uv = new Float32Array(n * 2), fog = new Float32Array(n);
     for (let i = 0; i < n; i++) {
       const x = m.positions[i * 3], y = m.positions[i * 3 + 1], z = m.positions[i * 3 + 2];
       const wz = SCALE.z * z + box.max.z;
       pos.set([SCALE.x * x, SCALE.y * y + box.max.y - DROP_Y, wz], i * 3);
       uv.set([m.uvs![i * 2], 1 - m.uvs![i * 2 + 1]], i * 2); // D3D v runs top-down
-      const ny = m.normals![normalOf[i] * 3 + 1];
-      shade[i] = Math.min(1, AMBIENT + LIGHT * Math.max(0, -ny));
       fog[i] = fogFactor(wz - eyeZ, depth);
     }
     const index = m.faces.flatMap((f) => f.slice(1, -1).flatMap((_, k) => [f[0], f[k + 1], f[k + 2]]));
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
-    g.setAttribute("shade", new THREE.BufferAttribute(shade, 1));
     g.setAttribute("fog", new THREE.BufferAttribute(fog, 1));
     g.setIndex(index);
     this.mesh.geometry.dispose();

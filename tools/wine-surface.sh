@@ -6,7 +6,8 @@
 #
 #   tools/wine-surface.sh OUTDIR [scene] [caustics 0|1] [frames] [crop WxH+X+Y] [delay-s]
 #
-# Always fish=0, sound off. Scene toggles from <sceneparams> via env (0/1):
+# Sound off; fish=0 unless LMA2_FISH=1 (the install's tank). Scene toggles
+# from <sceneparams> via env (0/1):
 #   LMA2_WATER (default 1)   the water surface - 0 gives a surface-free baseline
 #   LMA2_BUBLES (default 0)  bubbles       LMA2_PLANTS (default 0) plantsmoving
 #   LMA2_BG (default 1)      background    LMA2_FG (default 1)     foreground
@@ -32,7 +33,7 @@ sed -e "s/<index value=\"[0-9]*\"/<index value=\"$scene\"/" \
     -e "s/<causticonfish value=\"[0-9]*\"/<causticonfish value=\"$caustic\"/" \
     -e 's/<sound value="[0-9]*"/<sound value="0"/' \
     -e 's/<volume value="[0-9]*"/<volume value="0"/' \
-    -e 's/<fish value="[0-9]*"/<fish value="0"/g' \
+    -e "$([ "${LMA2_FISH:-0}" = 1 ] && echo 's/x/x/' || echo 's/<fish value="[0-9]*"/<fish value="0"/g')" \
     -e "s/<water value=\"[0-9]*\"/<water value=\"${LMA2_WATER:-1}\"/" \
     -e "s/<bubles value=\"[0-9]*\"/<bubles value=\"${LMA2_BUBLES:-0}\"/" \
     -e "s/<plantsmoving value=\"[0-9]*\"/<plantsmoving value=\"${LMA2_PLANTS:-0}\"/" \
