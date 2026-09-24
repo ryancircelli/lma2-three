@@ -1,6 +1,6 @@
 # Fidelity review (pessimist): the remake vs the original
 
-> **Round 2 (`main` @ 4d5476d) and Round 3 (`main` @ 38026f1) are at the end of this file. Round 3 has the current verdict.**
+> **Rounds 2, 3 and 4 are at the end of this file. Round 4 (`main` @ fe7fd19) has the current verdict: as close as reasonably possible.**
 > Sections 1-5 are the round-1 review of 4828608. They are kept as they were, for the before/after comparison.
 
 - **Reviewed:** `main` @ 4828608. **Branch:** `review/pessimist`.
@@ -815,3 +815,130 @@ If items 1-3 turn out to be deliberate original behaviour that our port already 
   - Any claim from one launch under about 3 minutes cannot rank a species.
 - **Per-frame integration in the original.** Changing the simulation rate from f5 to f30 moves turn counts by 5-20 %. Wine runs at about 5 fps; the original on real hardware would have run faster.
 - **Measurement.** probe-track's synthetic silhouettes break tracks less than real captures, and its reef-only occlusion is approximate. Differences below about 10 % in blob-pipeline statistics are within method error.
+
+---
+
+# Round 4 (`main` @ fe7fd19)
+
+Round 4 re-checks what feat/decomp2 (merged at cf35e23), 0263f33 and fe7fd19 changed. The motion3 and decomp2 reports were checked against my own measurements, not taken as given:
+
+- **Seeds and generator:** new seeds (3001-3016) with the original's CRT `rand()` (`--crt`).
+- **New reference launches:** 4 more bare sea-horse launches and a second full-scene launch of scene 2, at most two Wine captures at a time (`r4/ref`, frames thinned to every 60th).
+- **Real-pixel runs:** our browser, seeded from the clock (`?seed=time`), run through the same `track.ts` as the reference (`r4/full2a`, `r4/full2b`, `r4/full3a`, `r4/ytang-rp-*`).
+- **New tools:** `tools/horsedepth.py` (sea-horse depth per zone) and `tools/subtracks.py` (thins a track file to a slower frame rate).
+
+## R4.1 The "raw height = y 0" claim: CONFIRMED
+
+- **Loader:** `0x41bac0` finds the mesh named `height` through `0x42ecc0`. `0x42f7a0` (GetGeometry) only returns the +0x60 vertex pointer and the +0x5c count; I read it in the disassembly and it is 6 instructions long.
+- **Copy:** the copy loop at 0x4126d1 reads x and y at a 32-byte stride into the polyline. No matrix is applied anywhere on that path.
+- **Data:** the raw `height` vertices in all three `mesh.X` files have y = 0.000000 exactly. The profile is modelled in z, and only the frame matrix stands it upright for drawing.
+- **Consistency:** this matches how `Crab_Path` is read raw, which round 2 confirmed from the crab's screen height (within ±4 px).
+- **Consequence:** the reef line is world y = 0 everywhere. In scene 2, world y = 0 lies below the bottom of the screen, so fish there may cross the foreground plane anywhere.
+
+## R4.2 Nothing at 4:3 changed
+
+Nine 1024x768 `?clean=1&t=` stills were rendered on fe7fd19: painting, surface and caustics, all three scenes. Each is **pixel-identical** (ImageMagick AE = 0) to the same URL rendered on 4d5476d in round 2.
+
+## R4.3 Sea horse lows: CLOSED (my round-3 claim retracted)
+
+Blob height separates the two zones cleanly: near-zone horses are ≥ 92 px tall, far-zone ones 64-80 px. `horsedepth.py` measures the deepest centroid of every near-zone episode.
+
+| | Near-zone horse-seconds | Episodes | Deepest centre y | Episodes reaching > 600 px | Per 100 near horse-s |
+|---|---|---|---|---|---|
+| Reference, 5 older launches | 814 | 17 | 571 | 0 | 0 |
+| Reference, 4 new launches (d, e, f, g) | 1364 | 23 | **615 / 620 / 622** | 5 | 0.37 |
+| **Reference, all 9 launches** | 2177 | 40 | 622 | 5 | **0.23** |
+| Ours, 16 seeds × 240 s | 5081 | 28 | 628 | 15 | **0.30** |
+
+- **The original reaches the floor too.** 3 of the 4 new launches went to 615-622 px.
+- **The old launches were unrepresentative.** Four of them were mostly far-zone, where the floor is at 468 px.
+- **So "about half of near-zone horses reach the floor" is consistent with the original.** The floor-reaching rate is 0.30 against 0.23 per 100 near-horse-seconds, well within Poisson error for 5 events.
+- **The uninitialised fields need no explanation here.** Nothing is left for them to explain.
+
+## R4.4 Fish in front of the reef, after the raw-height change
+
+The table shows the share of moving-fish detections below the painted reef edge. The figure in brackets is the share more than 150 px below it.
+
+| Scene | Reference launches | Ours, probe-track --occlude, 4 CRT seeds | Ours, real pixels |
+|---|---|---|---|
+| 1 | 56.3 (39.3), 53.0 (33.3) | 58.1 (41.6), 53.5 (35.5), 51.3 (36.4), 43.9 (27.5) | - |
+| 2 | 63.3 (39.8), **59.7 (36.3) new** | 78.2 (63.5), 72.1 (52.0), 75.9 (62.2), 70.9 (59.3) | 72.6 (51.2), 64.2 (41.9) |
+| 3 | 48.5 (26.5), 52.0 (28.8) | 48.2 (27.2), 51.1 (29.3), 50.7 (35.6), 35.1 (16.4) | 43.7 (15.8) |
+
+- **Scenes 1 and 3:** the reference launches sit inside our spread, so both MATCH. My round-3 scene-3 item is CLOSED.
+- **Scene 2:** the new launch agrees with the old one (60-63 %, 36-40 % deep). Ours is higher.
+  - probe-track reads +10 to +24 points, but it ignores the occlusion by scene 2's large billboards and the real noise floor.
+  - The two real-pixel runs read +1 to +13 points (64/42 and 73/51 against 60/36 and 63/40). They are the fair comparison, because they are detected exactly like the reference.
+  - **Verdict: CLOSE, possibly slightly high.** With two launches per side and about ±6 points of launch spread, the difference is not established. It follows from R4.1: in scene 2 nothing stops fish crossing low. That is the original's rule, so there is no code change to make.
+
+## R4.5 Turn rate: the metric depends on the pipeline, and nothing can be claimed from it
+
+**Whole tank** (probe-track, CRT seeds, 30 fps; turns per track-minute):
+
+| Scene | Ours | Reference | Ratio |
+|---|---|---|---|
+| 1 | 2.69 | 3.73 | 0.72 |
+| 2 | 2.09 | 2.42 | 0.86 |
+| 3 | 2.29 | 2.87 | 0.80 |
+
+At Wine's ~5 fps, ours rises 5-20 % (round 3), which puts it at 0.85-1.0. MATCHES.
+
+**Yellow tang: the near/far explanation is only partly right.**
+- The motion agent's claim was that all three reference launches were far-zone. They were not. Splitting tracks by blob width (< 44 px = far-sized) gives:
+
+| | Far-sized tracks | Near-sized tracks |
+|---|---|---|
+| Reference, 3 launches | 1.73 (1215 s) | 2.36 (712 s) |
+| probe-track, 8 + 11 + 4 seeds | 2.28-2.75 | 3.28-4.88 |
+
+- At matched size, probe-track still says ours turns 1.3-2× as often.
+- **The decisive test is real pixels.** Three clock-seeded browser launches of `?bare=1&tank=yellow-tang:4` were tracked by `track.ts`. Against the reference thinned to the same frame rate (`subtracks.py`):
+
+| | Turns per min | Tracks ≥ 10 s | Track length p50 | Speed p50/p90 |
+|---|---|---|---|---|
+| Ours, real pixels | **0.91** (0.54-1.35) | 0.93 | 5.9 s | 26/70 |
+| Reference | 1.65 (1.27-2.12) | 1.95 | 11.8 s | 25/65 |
+
+  Speeds agree, so the browser clock was not throttled.
+- **Two pipelines give opposite answers:** real pixels say ours turns about half as often, probe-track about 1.5× as often.
+- **Why they disagree:**
+  - With 4 fish in a tight school, the blob linker merges fish, splits them and swaps identities.
+  - How often that happens depends on silhouette detail: fringes, alpha, colour noise.
+  - So the count moves by ±2× between measurement methods, more than any remaining difference between the programs.
+- **Code check:** the decompile audit (motion3) matches the follower, avoidance and gate code instruction by instruction.
+- **Verdict:** the yellow-tang turn excess is **not established**. The metric cannot resolve better than about 2× for a tight school, so there is nothing to fix. My round-3 item is withdrawn.
+
+## R4.6 Round-4 verdict
+
+**I agree: the remake is now as close to the original as can reasonably be achieved or measured.**
+
+Every item I raised in rounds 1-3 is closed, retracted or not established:
+
+- **Closed:** camera, painting, surface, caustic-lit surface, horizon, bubbles, colour, back faces, climb/dive, speeds, screen-bottom behaviour, crab, sea star, the sea-horse speed bug and start pose, reef-front in scenes 1 and 3.
+- **Retracted:**
+  - round-2 whole-tank turn excess: a pipeline artefact;
+  - round-3 sea-horse floor: the original reaches it too;
+  - round-2 purple-tang top speed: a single-launch artefact.
+- **Not established:**
+  - yellow-tang turn rate: the metric resolves only to about 2×;
+  - scene-2 reef-front, +1 to +13 points over 2 launches: the original's own rule;
+  - solo-angel climb ratio: a single launch per species.
+
+None of these has a code-level cause left. Pursuing them would need tens of reference launches per item, and even then the answer would be "distribution matches".
+
+**Final irreducible limits:**
+1. **The reference is Wine, not the original hardware.** Wine renders Direct3D 6 through Mesa's software GL, not a 2005 driver:
+   - painting 42-45 dB PSNR;
+   - Relief caustic level within ±9 % (scene 2 is 8.5 % dim);
+   - creature colours within ±10 levels;
+   - 1-px edge rules approximated by the 0.5 px nudge.
+2. **Per-launch randomness.** The original calls `srand(GetTickCount())` once (0x412483). The start state is unknowable, and after the first frame the sequence also depends on frame timing (motes draw `rand()` every frame). So zone timers (10-130 s), school membership, start poses, sea-horse spawn, the sea-star variant and the plant mask phases can only match in distribution. The measured launch-to-launch spread in the original:
+   - whole-tank turn rate ±25 %;
+   - purple-tang p90 speed 44-64 px/s;
+   - sea horse near-zone share and floor visits from 0 to 3 per launch;
+   - reef-front ±6 points.
+3. **Per-frame integration.** The original's position averaging, pitch smoothing and 10-frame avoidance history make its motion depend on frame rate. Wine runs it at about 5 fps, the browser at 60. The measured effect is 5-20 % on turn counts and under 5 % on speeds.
+4. **What the measurements can resolve:**
+   - Blob tracking of real or synthetic frames resolves speed, height, size and zone statistics to about 10 %.
+   - It resolves turn-around counts of tightly schooling fish only to about 2×.
+   - Any single reference launch shorter than about 3 minutes cannot rank a species.
