@@ -8,6 +8,7 @@
 //   ?t=<seconds>       freeze animation time (deterministic frames for diffs)
 //   ?size=WxH          fixed canvas size in CSS px, e.g. 1024x768 (the original's mode)
 //   ?clean=1           hide all UI and play no sound (reference comparisons)
+//   ?aa=1              MSAA on (off by default: the original has none)
 //   ?sound=0 / ?volume=<dB>   ambient loop off / its level (see audio.ts)
 //
 // window.lma2 exposes load state for automated checks (agent-browser eval).
@@ -62,7 +63,9 @@ if (size) {
   canvas.style.width = `${size[1]}px`;
   canvas.style.height = `${size[2]}px`;
 }
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+// No MSAA: the original (Direct3D 6) draws aliased edges on the fish, crab
+// and sea star. ?aa=1 turns it back on (for looking, not for comparisons).
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: params.get("aa") === "1", preserveDrawingBuffer: true });
 // A fixed size is for pixel comparison - keep it 1:1 with CSS pixels.
 renderer.setPixelRatio(size ? 1 : Math.min(devicePixelRatio, 2));
 
