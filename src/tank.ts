@@ -44,6 +44,21 @@ function rng(seed: number): () => number {
   };
 }
 
+/**
+ * The original's generator, exactly: MSVC CRT rand() (0x4455d3), holdrand =
+ * holdrand * 214013 + 2531011, result (holdrand >> 16) & 0x7fff; srand
+ * (0x4455c6) sets holdrand. The original calls srand ONCE, with
+ * GetTickCount(), at the top of scene init (0x412483), so every launch
+ * starts from a different, unrecorded seed.
+ */
+export function crtRand(seed: number): () => number {
+  let h = seed >>> 0;
+  return () => {
+    h = (Math.imul(h, 214013) + 2531011) >>> 0;
+    return (h >>> 16) & 0x7fff;
+  };
+}
+
 /** easeIn 0x417bf0: (sin(u pi - pi/2) + 1) / 2 (easeOut 0x417c10 = 1 - easeIn). No clamping. */
 const ease = (u: number) => (1 - Math.cos(Math.PI * u)) / 2;
 
@@ -301,7 +316,7 @@ export class Tank {
   private crabs: Crab[] = [];
   private stars: Star[] = [];
   private models = new Map<string, FishModel>();
-  private random: () => number;
+  private randInt: () => number;
   private data: SceneData | null = null;
   private sceneId: string | null = null;
   private t = 0;
@@ -313,8 +328,17 @@ export class Tank {
   /** Mesh animation on (off only for headless measurement: tools/probe-ours.ts). */
   animate = true;
 
-  constructor(seed = 20260923) {
-    this.random = rng(seed);
+  /**
+   * `crt`: draw from the original's MSVC rand() seeded with `seed` (the
+   * GetTickCount value of a launch: ?seed=); otherwise a mulberry32 stream
+   * (the fixed default, and the tools' --seed).
+   */
+  constructor(seed = 20260923, crt = false) {
+    if (crt) this.randInt = crtRand(seed);
+    else {
+      const r = rng(seed);
+      this.randInt = () => Math.floor(r() * 32768);
+    }
     // [render2] Lighting, fog and blending are the original's fixed-function pipeline,
     // per creature class, in the materials themselves (src/fixedfunction.ts,
     // applied in model()): fish L2 over ambient 0xAA with specular; the sea
@@ -390,7 +414,7 @@ export class Tank {
 
   /** MSVC-style rand(): 0..32767. */
   private rand(): number {
-    return Math.floor(this.random() * 32768);
+    return this.randInt();
   }
 
   private async model(entry: FishEntry, assetsUrl: string): Promise<FishModel> {
@@ -444,9 +468,14 @@ export class Tank {
       this.scene.add(holder);
     }
     // Fish constructor 0x416400 + load 0x414860; sea horse 0x41f260 + 0x41f330.
+    // rand() in the original's order: the fish constructor 0x416400 draws the
+    // front flag, the band and the zone timer; the load 0x414860 draws the
+    // time offset, then the navigator (0x4191a0) and the start pose (0x417d10)
+    // in spawn(), then the mood state. The sea horse (0x41f260 / 0x41f330)
+    // draws only for its navigator; its front flag is the base constructor's 1.
     const front = horse ? true : (this.rand() & 1) > 0;
     const band = horse ? 0 : this.rand() % 3;
-    const modeTimer = this.rand() % 120 + 10;
+    const modeTimer = horse ? 0 : this.rand() % 120 + 10;
     const timeOffset = horse ? 0 : (this.rand() % 100) * 0.1;
     const f: Fish = {
       species: entry.slug,
@@ -466,7 +495,7 @@ export class Tank {
       tt: timeOffset,
       sa: horse ? 1 : 2,
       // first duration: uninitialised memory in the original [unknown] - expires at once
-      sm: horse ? { state: 0, start: 0, duration: 0, max: 4 } : { state: this.rand() % 3, start: timeOffset, duration: 0, max: 4 },
+      sm: { state: 0, start: timeOffset, duration: 0, max: 4 }, // a fish draws its state after spawn(), below
       mode: 0,
       modeTimer,
       pos: new THREE.Vector3(),
@@ -514,6 +543,7 @@ export class Tank {
     this.fish.push(f);
     this.roster.push(f);
     if (this.data) this.spawn(f);
+    if (!horse) f.sm.state = this.rand() % 3; // 0x414860, after the start pose
     return f;
   }
 

@@ -47,8 +47,11 @@ export const CAUSTIC_SCROLL = { u: -0.5 / 6, v: -0.5 };
 /** Strength of the straight-down light on the Relief, per scene (decompiled;
  * scene 1 measured 0.28-0.29). */
 export const RELIEF_LIGHT: Record<string, number> = { "1": 0.3, "2": 0.5, "3": 0.5 };
-/** The fish pass's ambient, 0x10101010 (decompiled). CALIBRATE: what else
- * lights that pass is not established. */
+/** The fish pass's ambient, 0x10101010 (0x406050). The rest of its lighting
+ * is read too: 0x406050 changes only the blend (ONE/ONE), stage 0
+ * (TEXTURE x DIFFUSE, alpha = TEXTURE), the ambient and the fog colour, so the
+ * creature's own light (L2 for fish and sea horse, left on by the draw) and
+ * the fish's SPECULARENABLE still apply - as the shader below does. */
 export const FISH_CAUSTIC_AMBIENT = 0x10 / 255;
 
 /** The shared caustic clock at time t (seconds): which frame, and the UV scroll

@@ -159,7 +159,14 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   }
   new ResizeObserver(fit).observe(canvas);
 
-  const tank = new Tank();
+  // ?seed=N: the creatures draw from the original's MSVC rand() seeded with N,
+  // as a launch whose GetTickCount() was N would (0x412483). ?seed=time: a new
+  // seed per load, the original's own behaviour. No ?seed: a fixed stream, so
+  // captures and ?t= frames repeat.
+  const seedParam = params.get("seed");
+  const tank = seedParam === null
+    ? new Tank()
+    : new Tank(seedParam === "time" ? Math.floor(performance.timeOrigin + performance.now()) >>> 0 : Number(seedParam) >>> 0, true);
   const nearScene = new THREE.Scene(); // billboards in front of the fish
   const effects = new Effects(ASSETS, params, nearScene); // --- effects (see effects.ts for the layering)
   if (params.get("school") === "0") tank.schooling = false;
