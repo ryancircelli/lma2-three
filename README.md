@@ -95,9 +95,10 @@ Two meshes have no triangles and are data, not geometry: `Crab_Path` (25-35 poin
 Every push to `main` runs `.github/workflows/deploy.yml`, which type-checks, tests, builds and stages `_site/`, then deploys it with
 wrangler to **https://lma2-three.ryancircelli.workers.dev**.
 
-- **Password gate**: `worker/index.ts` runs in front of every request (`assets.run_worker_first` in `wrangler.jsonc`), checks HTTP
-  Basic auth against the Worker secret `SITE_PASSWORD`, and returns 401 otherwise. The browser asks once; any username works. With
-  no secret set, it serves nothing (503).
+- **Password gate**: `worker/index.ts` runs in front of every request (`assets.run_worker_first` in `wrangler.jsonc`). Without a
+  valid session cookie it shows a password-only login page; the right password (the Worker secret `SITE_PASSWORD`) sets an HttpOnly
+  cookie for 30 days. The cookie is an HMAC of the password, so changing the password signs everyone out. With no secret set, it
+  serves nothing (503).
 - **Where the secrets live** (none are in the repo):
   - GitHub Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. The token is scoped to this one account, with only
     *Workers Scripts: Edit* and *Account Settings: Read*. It is named "lma2-three deploy (GitHub Actions)" in the Cloudflare dashboard.
