@@ -580,10 +580,21 @@ export class Tank {
       centre: new THREE.Vector3(),
       P: [],
       u: 0,
-      // turnBack and the two counters are uninitialised during the pre-simulation [unknown]
+      // 0x4191a0 writes neither +4 (turnBack) nor +0xe8 / +0xec (the random
+      // pitch / yaw counters) before its pre-simulation loop (it sets the
+      // counters to rand()%3 only AFTER it, at 0x4193a0 / 0x4193bc): they hold
+      // stale heap memory [read]. What that memory holds is not in the code,
+      // but the captures pin it down [inferred]: all 8 sea horses tracked at
+      // launch in 3 Wine runs (r2/sp/sea-horse, r3/ref/horse-b, horse-c) start
+      // LEVEL, at exactly their zone's centre height (blob cy 246-251 px far,
+      // 330-334 px near; zone centres 257 / 345 px at the origin). With zeroed
+      // counters the pre-simulation pitches the path (0 of 90 of our horses
+      // started level), so the counters must be positive and larger than the
+      // number of in-zone pre-simulation steps: no random turns before launch.
+      // turnBack stays -1: the captures do not constrain it.
       turnBack: -1,
-      cntV: 0,
-      cntH: 0,
+      cntV: Number.MAX_SAFE_INTEGER,
+      cntH: Number.MAX_SAFE_INTEGER,
       flipPending: false,
       timer: 0,
     };
