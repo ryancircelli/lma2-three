@@ -819,10 +819,14 @@ export class Tank {
     const zf = (b.maxZ - p.z) / (b.maxZ - b.minZ);
     const A = (f.sa + 2) / 17;
     const horse = f.kind === "horse";
-    // Sea horse sway: a = 12 phase; the body yaws by cos(a)/3 - pi/2 and
-    // blends centre->left (sin a < 0) or ->right.
+    // Sea horse sway: a = 12 phase; the body yaws by cos(a)/3 and blends
+    // centre->left (sin a < 0) or ->right. The doc's body yaw is cos(a)/3 - pi/2;
+    // the -pi/2 must belong to a frame convention not recovered [inferred]:
+    // measured, the original's horses are SIDE-ON while drifting across the
+    // screen (width/height 0.42 when |vx| > 15 px/s, 0.18 when < 5 px/s); with
+    // -pi/2 here they came out edge-on (0.25 / 0.41). Model +X is the snout.
     const a = 12 * f.swayPhase;
-    const wobYaw = horse ? Math.cos(a) / 3 - Math.PI / 2 : A * Math.sin(5 * tt) / 6;
+    const wobYaw = horse ? Math.cos(a) / 3 : A * Math.sin(5 * tt) / 6;
     const wobPit = horse ? 0 : -A * Math.cos(2 * tt) / 6;
     const yaw = f.yaw + wobYaw, pitch = f.pitch + wobPit;
     // Sea horse: CALIBRATE - how the navigator turns its 6k step into distance

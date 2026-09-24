@@ -71,6 +71,25 @@ function stats(frames: Blob[][], tracks: Blob[][]) {
       if (sign) lastSign = sign;
     }
   }
+  // grouping (schooling): per frame, the mean pairwise and nearest-neighbour
+  // distance between the creatures on screen, and how many are visible
+  const pair: number[] = [], nn: number[] = [], vis: number[] = [];
+  for (const fr of frames) {
+    vis.push(fr.length);
+    if (fr.length < 2) continue;
+    let sum = 0, k = 0;
+    for (let i = 0; i < fr.length; i++) {
+      let best = Infinity;
+      for (let j = 0; j < fr.length; j++) {
+        if (i === j) continue;
+        const d = Math.hypot(fr[i].cx - fr[j].cx, fr[i].cy - fr[j].cy);
+        best = Math.min(best, d);
+        if (j > i) sum += d, k++;
+      }
+      nn.push(best);
+    }
+    pair.push(sum / k);
+  }
   const all = frames.flat();
   const ws = all.map((b) => b.x1 - b.x0 + 1).filter((w) => w < 400), hs = all.map((b) => b.y1 - b.y0 + 1).filter((h) => h < 400);
   return {
@@ -86,10 +105,13 @@ function stats(frames: Blob[][], tracks: Blob[][]) {
     w90: q(ws, 0.9),
     h50: q(hs, 0.5),
     h90: q(hs, 0.9),
+    pair50: q(pair, 0.5),
+    nn50: q(nn, 0.5),
+    vis50: q(vis, 0.5),
   };
 }
 
-console.log("label".padEnd(28) + "  blobs  speed p50/p90 px/s  |vy/vx|  turns/min  centre-y p02/p50/p98   width p50/p90  height p50/p90");
+console.log("label".padEnd(28) + "  blobs  speed p50/p90 px/s  |vy/vx|  turns/min  centre-y p02/p50/p98   width p50/p90  height p50/p90  pair/nn/visible");
 for (const a of args._.map(String)) {
   const [label, file] = a.includes("=") ? a.split("=") : [a, a];
   // file1+file2+...: pool several runs
@@ -103,6 +125,6 @@ for (const a of args._.map(String)) {
   console.log(
     `${label.padEnd(28)}  ${String(s.n).padStart(5)}  ${f0(s.speed50).padStart(6)}/${f0(s.speed90).padEnd(12)} ${f0(s.slope50, 2).padStart(6)}  ${
       f0(s.turns, 1).padStart(8)
-    }  ${f0(s.cy02).padStart(7)}/${f0(s.cy50)}/${f0(s.cy98).padEnd(10)} ${f0(s.w50).padStart(6)}/${f0(s.w90).padEnd(7)} ${f0(s.h50).padStart(6)}/${f0(s.h90)}`,
+    }  ${f0(s.cy02).padStart(7)}/${f0(s.cy50)}/${f0(s.cy98).padEnd(10)} ${f0(s.w50).padStart(6)}/${f0(s.w90).padEnd(7)} ${f0(s.h50).padStart(6)}/${f0(s.h90).padEnd(6)} ${f0(s.pair50)}/${f0(s.nn50)}/${f0(s.vis50)}`,
   );
 }
