@@ -15,7 +15,7 @@
 //   ?speed=0.5..4      playback speed (also the Speed selector)
 //
 // Keys: F or double-click toggles fullscreen (UI and cursor hide until the
-// mouse moves); M toggles sound.
+// mouse moves; the display is kept awake); M toggles sound.
 //
 // window.lma2 exposes load state for automated checks (agent-browser eval).
 
@@ -484,10 +484,30 @@ function setupFullscreen(): void {
     if (document.fullscreenElement) idle = setTimeout(() => document.body.classList.add("idle"), 2500);
   };
   addEventListener("mousemove", wake);
+
+  // Keep the display awake while fullscreen, like a screensaver (Screen Wake
+  // Lock API). The browser drops the lock whenever the tab is hidden, so it is
+  // taken again when the tab comes back while still fullscreen.
+  let lock: WakeLockSentinel | null = null;
+  const holdAwake = async (on: boolean) => {
+    if (!("wakeLock" in navigator)) return; // unsupported: the display may sleep as usual
+    if (on && !lock) {
+      lock = await navigator.wakeLock.request("screen").catch(() => null);
+      lock?.addEventListener("release", () => (lock = null));
+    } else if (!on && lock) {
+      await lock.release().catch(() => {});
+      lock = null;
+    }
+  };
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && document.fullscreenElement) void holdAwake(true);
+  });
+
   document.addEventListener("fullscreenchange", () => {
     render();
     button.blur(); // so Space/Enter don't re-trigger it
     wake();
+    void holdAwake(!!document.fullscreenElement);
   });
 }
 
