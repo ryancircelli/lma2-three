@@ -2,7 +2,11 @@
 // every creature's on-screen box over time, for tools/motion-stats.ts.
 //
 //   deno run -A tools/probe-ours.ts OUT.json [--scene 1] [--tank slug=4,slug=2 | --all]
-//        [--warm 10] [--seconds 60] [--hz 5] [--seed N] [--school 0]
+//        [--warm 10] [--seconds 60] [--hz 5] [--seed N] [--school 0] [--step 0.0333]
+//
+// --step: simulation frame length in seconds (default 1/30). The original is
+// per-frame (position averaging, pitch smoothing, 10-frame avoidance history),
+// so this matters: Wine references run at ~4-8 fps.
 //
 // Without --tank, the configured tank (assets/manifest.json). The camera is
 // the original's: ortho over 98% of the scene's full bbox, eye x = 0.
@@ -31,7 +35,7 @@ const { loadXDoc } = await import("../src/xloader.ts");
 const THREE = await import("three");
 
 const args = parseArgs(Deno.args, {
-  string: ["scene", "tank", "warm", "seconds", "hz", "school", "seed"],
+  string: ["scene", "tank", "warm", "seconds", "hz", "school", "seed", "step"],
   boolean: ["all"],
   default: { scene: "1", warm: "10", seconds: "60", hz: "5" },
 });
@@ -53,8 +57,8 @@ tank.setView(0, (box.min.y + box.max.y) / 2, (box.max.x - box.min.x) * 0.98 / 2,
 await tank.setScene(args.scene, root);
 await tank.populate(manifest.fish, stock, root);
 
-const hz = Number(args.hz), step = 1 / 30;
-tank.simulateTo(Number(args.warm));
+const hz = Number(args.hz), step = args.step ? Number(args.step) : 1 / 30;
+tank.simulateTo(Number(args.warm), step);
 const species: string[] = [];
 const idx = (s: string) => (species.includes(s) ? species.indexOf(s) : species.push(s) - 1);
 const samples: [number, number[][]][] = [];
