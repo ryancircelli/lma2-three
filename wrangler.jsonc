@@ -1,0 +1,14 @@
+// Cloudflare Worker serving the static site (Workers Static Assets, no script).
+// Deployed by .github/workflows/deploy.yml. The hostname is protected by a
+// Cloudflare Access application - see README "Deploy".
+{
+  "name": "lma2-three",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./_site"
+  },
+  "workers_dev": true,
+  // Per-version preview URLs are separate hostnames that the Access application
+  // does not cover - keep them off so nothing is ever served unprotected.
+  "preview_urls": false
+}

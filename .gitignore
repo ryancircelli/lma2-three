@@ -1,3 +1,9 @@
+# Secrets - never commit. Cloudflare credentials live in GitHub Actions secrets.
+.env
+.env.*
+.dev.vars
+*.pem
+
 # assets/ IS committed: this repo is private, and the deploy pipeline serves it.
 # (Regenerable from an install with `deno task extract`.)
 

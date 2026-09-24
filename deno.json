@@ -13,7 +13,8 @@
     "check": "deno check src/ tools/",
     "build": "deno bundle --platform browser --sourcemap=linked -o dist/app.js src/main.ts",
     "serve": "deno run --allow-net=127.0.0.1 --allow-read tools/serve.ts",
-    "dev": "deno task build && deno task serve"
+    "dev": "deno task build && deno task serve",
+    "stage": "deno run --allow-read --allow-write tools/stage.ts"
   },
   "fmt": {
     "lineWidth": 140

@@ -1,0 +1,50 @@
+name: Build and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    env:
+      # Deploy only once the secret exists; until then CI still builds and tests.
+      HAS_CLOUDFLARE: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Type-check
+        run: deno task check
+
+      - name: Parse and build every model
+        run: deno task test
+
+      - name: Bundle
+        run: deno task build
+
+      - name: Stage site
+        run: deno task stage
+
+      - name: Deploy to Cloudflare
+        if: env.HAS_CLOUDFLARE == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+
+      - name: Deploy skipped
+        if: env.HAS_CLOUDFLARE != 'true'
+        run: echo "::notice::CLOUDFLARE_API_TOKEN is not set - built and tested, not deployed."
