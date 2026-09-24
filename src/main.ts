@@ -232,8 +232,12 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     if (frozenT !== null) tank.simulateTo(frozenT);
     done(`scene-${select.value}`, `Scene ${select.value} · ${tank.count} creatures`);
   }
-  // water surface: its brightness depends on what else is drawn (surface.ts DIFFUSE)
-  surface.configure({ caustics: params.get("caustics") !== "0", creatures: tank.count > 0 });
+  // water surface: its diffuse is the ambient light state the previous frame
+  // left (surface.ts): the Foreground's 0xFF, 0x80 after the Relief caustics,
+  // then whatever the last creatures drawn set (Tank.ambientLeft).
+  const caustic = params.get("caustics") !== "0";
+  const causticOnFish = caustic && params.get("causticonfish") !== "0";
+  const ambientLeft = () => tank.ambientLeft(caustic, causticOnFish) ?? (caustic ? 0x80 / 255 : 1);
 
   // [feat/fish] The original's draw order (docs/original-logic.md 2.2), one
   // orthographic camera throughout: scene pass 0 (`back`); creatures BEHIND
@@ -272,6 +276,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     renderer.render(nearScene, camera); // light motes (--- effects)
     renderer.clearDepth();
     tank.renderGlass(renderer); // sea star on the glass
+    surface.setAmbient(ambientLeft()); // for the NEXT frame's surface (a render-state leak in the original)
   };
 }
 

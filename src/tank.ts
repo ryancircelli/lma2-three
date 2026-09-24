@@ -902,6 +902,25 @@ export class Tank {
   }
 
   /**
+   * The ambient light state (grey, 0..1) that the creatures leave set at the
+   * end of a frame, or null if they set none (the water surface inherits it:
+   * surface.ts). The last creatures drawn are those in FRONT of the
+   * foreground, far to near: the nearest one's draw sets 0xAA (a fish;
+   * 0x80 after its caustic pass when causticonfish is on) or 0x80 (a sea
+   * horse). A sea star on the glass comes after them, and its caustic pass
+   * (with `caustic`) restores 0x80. Invisible leaders draw nothing.
+   * (docs/fidelity-review.md D4; SetLightState(AMBIENT) at 0x416925,
+   * 0x40612c, 0x41f956, 0x420a65.)
+   */
+  ambientLeft(caustic: boolean, causticOnFish: boolean): number | null {
+    let nearest: Fish | null = null;
+    for (const f of this.fish) if (f.holder && f.front && (!nearest || f.pos.z < nearest.pos.z)) nearest = f;
+    let level: number | null = nearest ? (nearest.kind === "fish" && !causticOnFish ? 0xaa : 0x80) : null;
+    if (caustic && this.stars.some((s) => s.glass)) level = 0x80;
+    return level === null ? null : level / 255;
+  }
+
+  /**
    * Measurement hook (tools/track.ts comparisons): every visible creature's
    * on-screen silhouette box in pixels of a `width` x `height` view.
    */
