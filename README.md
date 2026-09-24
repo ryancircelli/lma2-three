@@ -5,7 +5,7 @@
 TypeScript throughout, run and bundled with Deno. No Node, no ffmpeg, no system dependencies.
 
 - **Watch it:** https://lma2.ryancircelli.com
-- **Windows screensaver:** [LMA2-Aquarium.scr](https://github.com/ryancircelli/lma2-three/releases/latest/download/LMA2-Aquarium.scr)
+- **Windows screensaver:** [LMA2-Aquarium-Setup.exe](https://github.com/ryancircelli/lma2-three/releases/latest/download/LMA2-Aquarium-Setup.exe)
   (latest release; all releases: https://github.com/ryancircelli/lma2-three/releases)
 
 The original's art, models, textures and sound are Freeze.com / Triodesign's, extracted from the 2005 screensaver
@@ -117,16 +117,20 @@ every load is a fresh launch. `?seed=N` replays one; reference captures (`?t=`, 
 `screensaver/` wraps the site as a real Windows screensaver: one `.scr` with the built site embedded, rendered offline by
 WebView2 (the Edge engine built into Windows 10/11) on .NET Framework 4.8 (also built in), so nothing needs installing.
 
-- **Install:** download [LMA2-Aquarium.scr](https://github.com/ryancircelli/lma2-three/releases/latest/download/LMA2-Aquarium.scr),
-  double-click it, press **Install as my screensaver**. That copies it to `%LOCALAPPDATA%\LMA2Screensaver\` and selects it in
-  Screen Saver Settings. The file isn't code-signed, so SmartScreen may warn: *More info* > *Run anyway*.
-- **Behaviour:** `/s` fills every monitor (or only the primary, by setting) and, like the original, exits on any key, mouse
+- **Install:** run [LMA2-Aquarium-Setup.exe](https://github.com/ryancircelli/lma2-three/releases/latest/download/LMA2-Aquarium-Setup.exe),
+  choose the settings (plus the wait time and whether to show the sign-in screen on resume) and press **Install**. It installs
+  per user without admin rights: the screensaver goes to `%LOCALAPPDATA%\LMA2Screensaver\LMA2-Aquarium.scr`, is selected in
+  Screen Saver Settings, and gets an Apps & features entry for uninstalling. Running Setup again offers Update and Uninstall.
+  It isn't code-signed, so SmartScreen may warn: *More info* > *Run anyway*. (`LMA2-Aquarium.scr` is also published for manual
+  installs; double-clicking an `.scr` just runs it, which is why Setup is an `.exe`.)
+- **Behaviour:** the same program is the installer (run as an `.exe` without arguments) and the screensaver. `/s` fills every monitor (or only the primary, by setting) and, like the original, exits on any key, mouse
   button, or a mouse move of more than 120 px; sound plays on the primary monitor only. `/p` draws the Screen Saver Settings
   preview; `/c` (or a double-click) opens its settings: scene, widescreen mode, speed, fish, schooling, sound, monitors
-  (stored in `HKCU\Software\LMA2Screensaver`). Test modes: `/w` (a normal window) and `/selftest <dir>`.
+  (stored in `HKCU\Software\LMA2Screensaver`); `/uninstall` removes it. Test modes: `/w` (a normal window) and
+  `/selftest <dir>`.
 - **Releases:** `.github/workflows/release.yml` builds it on every change to the site or `screensaver/` (Windows runner:
   `deno task build/stage`, zip `_site/` into `screensaver/site.zip`, `dotnet build`), publishes release `v1.0.<run>` with
-  `LMA2-Aquarium.scr`, and keeps the 5 newest, so the `releases/latest/download/...` link above is always current.
+  `LMA2-Aquarium-Setup.exe` and `LMA2-Aquarium.scr`, and keeps the 5 newest, so the `releases/latest/download/...` link above is always current.
 
 ## Fidelity
 

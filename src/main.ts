@@ -528,7 +528,7 @@ async function main(): Promise<void> {
 // The source, and the Windows screensaver build (screensaver/, published by
 // .github/workflows/release.yml; "latest" always points at the newest release).
 const GITHUB = "https://github.com/ryancircelli/lma2-three";
-const SCREENSAVER = `${GITHUB}/releases/latest/download/LMA2-Aquarium.scr`;
+const SCREENSAVER = `${GITHUB}/releases/latest/download/LMA2-Aquarium-Setup.exe`;
 
 function addLinks(): void {
   const link = (text: string, href: string, title: string) => {
@@ -541,7 +541,7 @@ function addLinks(): void {
     return a;
   };
   panel.append(
-    link("Screensaver ↓", SCREENSAVER, "Download the Windows screensaver (.scr): double-click it, then Install as my screensaver"),
+    link("Screensaver ↓", SCREENSAVER, "Download the Windows screensaver installer: run it, pick your settings, press Install"),
     link("GitHub", GITHUB, "Source code and releases"),
   );
 }

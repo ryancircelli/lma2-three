@@ -1,8 +1,10 @@
 name: Screensaver release
 
 # Builds the Windows screensaver (screensaver/) with the current site embedded
-# and publishes it as a GitHub Release, so this URL always serves the newest:
-#   https://github.com/ryancircelli/lma2-three/releases/latest/download/LMA2-Aquarium.scr
+# and publishes it as a GitHub Release, so these URLs always serve the newest:
+#   https://github.com/ryancircelli/lma2-three/releases/latest/download/LMA2-Aquarium-Setup.exe  (installer)
+#   https://github.com/ryancircelli/lma2-three/releases/latest/download/LMA2-Aquarium.scr        (bare screensaver)
+# Both are the same program; run as an .exe it is the installer.
 
 on:
   push:
@@ -52,6 +54,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory out | Out-Null
+          Copy-Item screensaver/bin/Release/net48/LMA2.exe out/LMA2-Aquarium-Setup.exe
           Copy-Item screensaver/bin/Release/net48/LMA2.exe out/LMA2-Aquarium.scr
           "{0:N1} MB" -f ((Get-Item out/LMA2-Aquarium.scr).Length / 1MB)
 
@@ -70,7 +73,7 @@ jobs:
         with:
           name: screensaver-${{ env.VERSION }}
           path: |
-            out/LMA2-Aquarium.scr
+            out/
             selftest/
 
       - name: Publish release
@@ -81,13 +84,15 @@ jobs:
           $notes = @"
           Living Marine Aquarium 2, rebuilt in three.js, as a Windows screensaver (Windows 10/11).
 
-          **Install:** download ``LMA2-Aquarium.scr``, double-click it, and press **Install as my screensaver**.
-          Windows SmartScreen may warn because the file isn't code-signed: choose *More info* > *Run anyway*.
+          **Install:** download ``LMA2-Aquarium-Setup.exe`` and run it. Pick the scene, widescreen mode, speed, fish, sound,
+          monitors and how long to wait, then press **Install**. It installs for your user only (no admin) and can be
+          removed from Apps & features. Windows SmartScreen may warn because the file isn't code-signed: choose
+          *More info* > *Run anyway*.
 
-          Settings: scene, widescreen mode (fit / fill / stretch), speed, fish, schooling, sound, all monitors.
+          ``LMA2-Aquarium.scr`` is the bare screensaver for manual installs (right-click > Install).
           Built from ${{ github.sha }}. Live version: https://lma2.ryancircelli.com
           "@
-          gh release create "v$env:VERSION" out/LMA2-Aquarium.scr --title "Screensaver $env:VERSION" --notes $notes --latest
+          gh release create "v$env:VERSION" out/LMA2-Aquarium-Setup.exe out/LMA2-Aquarium.scr --title "Screensaver $env:VERSION" --notes $notes --latest
 
       - name: Keep the 5 newest releases
         env:

@@ -1,5 +1,11 @@
-// The /c settings dialog (also what a double-click on the .scr opens), with an
-// "Install as my screensaver" button so no manual steps are needed.
+// Two faces of one dialog:
+//   Setup     LMA2-Aquarium-Setup.exe run directly: pick settings, then Install
+//             (copies itself into place as the screensaver, selects it, sets
+//             the wait time, registers in Apps & features). Offers Uninstall
+//             when already installed.
+//   Settings  the installed .scr with /c (Screen Saver Settings > Settings...).
+// Double-clicking a .scr makes Windows run it as the screensaver (/S), which is
+// why setup is distributed as an .exe.
 
 using System;
 using System.Diagnostics;
@@ -14,37 +20,53 @@ namespace Lma2Saver
     {
         private const string Website = "https://lma2.ryancircelli.com";
         private const string GitHub = "https://github.com/ryancircelli/lma2-three";
-        public const string InstalledName = "LMA2-Aquarium.scr";
 
+        private readonly bool setup;
         private readonly Settings settings = Settings.Load();
         private readonly ComboBox scene = Combo("Next scene each time (like the original)", "Scene 1", "Scene 2", "Scene 3");
         private readonly ComboBox view = Combo("Fit - 4:3 with black bars", "Fill - zoom to cover (crops)", "Stretch to the screen");
         private readonly ComboBox speed = Combo("0.5x", "1x", "1.5x", "2x", "3x", "4x");
         private readonly ComboBox tank = Combo("The original's default tank", "One of every species (19)");
+        private readonly ComboBox wait = Combo("1 minute", "2 minutes", "3 minutes", "5 minutes", "10 minutes", "15 minutes", "20 minutes", "30 minutes", "45 minutes", "1 hour");
         private readonly CheckBox schooling = new CheckBox { Text = "Schooling", AutoSize = true };
         private readonly CheckBox sound = new CheckBox { Text = "Play the underwater sound", AutoSize = true };
         private readonly CheckBox allMonitors = new CheckBox { Text = "Show on every monitor (otherwise black)", AutoSize = true };
+        private readonly CheckBox secure = new CheckBox { Text = "On resume, show the sign-in screen", AutoSize = true };
 
         private static readonly string[] Scenes = { "rotate", "1", "2", "3" };
         private static readonly string[] Views = { "fit", "fill", "stretch" };
         private static readonly string[] Speeds = { "0.5", "1", "1.5", "2", "3", "4" };
         private static readonly string[] Tanks = { "installed", "all" };
+        private static readonly int[] WaitMinutes = { 1, 2, 3, 5, 10, 15, 20, 30, 45, 60 };
 
-        public SettingsForm()
+        public SettingsForm(bool setup)
         {
-            Text = "Living Marine Aquarium 2 - Screensaver settings";
+            this.setup = setup;
+            Text = setup ? "Living Marine Aquarium 2 - Setup" : "Living Marine Aquarium 2 - Screensaver settings";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
             AutoSize = true;
             AutoSizeMode = AutoSizeMode.GrowAndShrink;
-            Padding = new Padding(12);
+            AutoScaleMode = AutoScaleMode.Dpi;
+            Padding = new Padding(14);
             Font = SystemFonts.MessageBoxFont;
 
             var grid = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Dock = DockStyle.Fill };
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+            string intro = setup
+                ? (Installer.IsInstalled
+                    ? "Installed (version " + Installer.InstalledVersion + "). Change settings and press Install to update, or Uninstall."
+                    : "Choose how the aquarium should look, then press Install.")
+                : "Living Marine Aquarium 2 screensaver settings.";
+            var heading = new Label { Text = intro, AutoSize = true, MaximumSize = new Size(460, 0), Margin = new Padding(0, 0, 0, 10) };
+            grid.Controls.Add(heading, 0, 0);
+            grid.SetColumnSpan(heading, 2);
+            grid.RowCount = 1;
+
             Row(grid, "Scene", scene);
             Row(grid, "Widescreen", view);
             Row(grid, "Speed", speed);
@@ -52,31 +74,49 @@ namespace Lma2Saver
             Row(grid, "", schooling);
             Row(grid, "", sound);
             Row(grid, "", allMonitors);
+            if (setup)
+            {
+                Row(grid, "Start after", wait);
+                Row(grid, "", secure);
+            }
 
             var links = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 10, 0, 0) };
             links.Controls.Add(Link("Website", Website));
             links.Controls.Add(Link("GitHub", GitHub));
             links.Controls.Add(new Label { Text = "Version " + Embedded.Version, AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(12, 3, 0, 0) });
-            grid.Controls.Add(links, 0, grid.RowCount);
-            grid.SetColumnSpan(links, 2);
-            grid.RowCount++;
+            AddSpanning(grid, links);
 
-            var buttons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0, 12, 0, 0) };
-            var install = new Button { Text = "Install as my screensaver", AutoSize = true };
+            var buttons = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 14, 0, 0) };
             var preview = new Button { Text = "Preview", AutoSize = true };
-            var ok = new Button { Text = "OK", AutoSize = true, DialogResult = DialogResult.OK };
-            var cancel = new Button { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
-            install.Click += (s, e) => { Store(); Install(); };
             preview.Click += (s, e) => { Store(); Process.Start(Application.ExecutablePath, "/s"); };
-            ok.Click += (s, e) => { Store(); Close(); };
-            buttons.Controls.AddRange(new Control[] { install, preview, ok, cancel });
-            grid.Controls.Add(buttons, 0, grid.RowCount);
-            grid.SetColumnSpan(buttons, 2);
-            grid.RowCount++;
-
+            if (setup)
+            {
+                var install = new Button { Text = Installer.IsInstalled ? "Update" : "Install", AutoSize = true };
+                install.Click += (s, e) => DoInstall();
+                var cancel = new Button { Text = "Close", AutoSize = true, DialogResult = DialogResult.Cancel };
+                buttons.Controls.Add(install);
+                buttons.Controls.Add(preview);
+                if (Installer.IsInstalled)
+                {
+                    var uninstall = new Button { Text = "Uninstall", AutoSize = true };
+                    uninstall.Click += (s, e) => { if (Installer.ConfirmAndUninstall(this)) Close(); };
+                    buttons.Controls.Add(uninstall);
+                }
+                buttons.Controls.Add(cancel);
+                AcceptButton = install;
+                CancelButton = cancel;
+            }
+            else
+            {
+                var ok = new Button { Text = "OK", AutoSize = true };
+                ok.Click += (s, e) => { Store(); Close(); };
+                var cancel = new Button { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
+                buttons.Controls.AddRange(new Control[] { preview, ok, cancel });
+                AcceptButton = ok;
+                CancelButton = cancel;
+            }
+            AddSpanning(grid, buttons);
             Controls.Add(grid);
-            AcceptButton = ok;
-            CancelButton = cancel;
 
             scene.SelectedIndex = Math.Max(0, Array.IndexOf(Scenes, settings.Scene));
             view.SelectedIndex = Math.Max(0, Array.IndexOf(Views, settings.Aspect));
@@ -85,6 +125,12 @@ namespace Lma2Saver
             schooling.Checked = settings.Schooling;
             sound.Checked = settings.Sound;
             allMonitors.Checked = settings.AllMonitors;
+            int minutes = Installer.CurrentWaitMinutes();
+            int best = 0;
+            for (int i = 0; i < WaitMinutes.Length; i++)
+                if (Math.Abs(WaitMinutes[i] - minutes) < Math.Abs(WaitMinutes[best] - minutes)) best = i;
+            wait.SelectedIndex = best;
+            secure.Checked = Installer.CurrentSecure();
         }
 
         private void Store()
@@ -99,48 +145,31 @@ namespace Lma2Saver
             settings.Save();
         }
 
-        /// <summary>
-        /// Copy this .scr to %LOCALAPPDATA%\LMA2Screensaver and make it the
-        /// current user's screensaver (what right-click > Install does, but to a
-        /// folder that won't be cleaned up like Downloads).
-        /// </summary>
-        private void Install()
+        private void DoInstall()
         {
+            Store();
             try
             {
-                string target = Path.Combine(Embedded.DataDir, InstalledName);
-                string self = Path.GetFullPath(Application.ExecutablePath);
-                if (!string.Equals(self, target, StringComparison.OrdinalIgnoreCase))
-                {
-                    Directory.CreateDirectory(Embedded.DataDir);
-                    File.Copy(self, target, true);
-                    // The download's "from the internet" mark would make Windows ask
-                    // before every start; the user has just chosen to install it.
-                    Native.DeleteFile(target + ":Zone.Identifier");
-                }
-                using (RegistryKey desktop = Registry.CurrentUser.CreateSubKey(@"Control Panel\Desktop"))
-                {
-                    desktop.SetValue("SCRNSAVE.EXE", target);
-                    desktop.SetValue("ScreenSaveActive", "1");
-                    if (desktop.GetValue("ScreenSaveTimeOut") == null) desktop.SetValue("ScreenSaveTimeOut", "600");
-                }
-                const uint SPI_SETSCREENSAVEACTIVE = 0x0011, SPIF_UPDATEINIFILE = 0x01, SPIF_SENDCHANGE = 0x02;
-                Native.SystemParametersInfo(SPI_SETSCREENSAVEACTIVE, 1, IntPtr.Zero, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
-                MessageBox.Show(this,
-                    "Installed. Living Marine Aquarium 2 is now your screensaver.\n\n" +
-                    "The Screen Saver Settings window will open so you can set the wait time.",
-                    Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                Process.Start("control.exe", "desk.cpl,,@screensaver");
+                Installer.Install(WaitMinutes[wait.SelectedIndex], secure.Checked);
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, "Could not install: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, "Could not install: " + ex.Message +
+                    "\n\nIf the screensaver is running right now, stop it and try again.",
+                    Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
             }
+            DialogResult open = MessageBox.Show(this,
+                "Installed. Living Marine Aquarium 2 is now your screensaver and starts after " +
+                wait.Text + " of inactivity.\n\nOpen Windows' Screen Saver Settings to check?",
+                Text, MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+            if (open == DialogResult.Yes) Process.Start("control.exe", "desk.cpl,,@screensaver");
+            Close();
         }
 
         private static ComboBox Combo(params string[] items)
         {
-            var c = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 280 };
+            var c = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 300 };
             c.Items.AddRange(items);
             return c;
         }
@@ -149,6 +178,13 @@ namespace Lma2Saver
         {
             grid.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 12, 0) }, 0, grid.RowCount);
             grid.Controls.Add(control, 1, grid.RowCount);
+            grid.RowCount++;
+        }
+
+        private static void AddSpanning(TableLayoutPanel grid, Control control)
+        {
+            grid.Controls.Add(control, 0, grid.RowCount);
+            grid.SetColumnSpan(control, 2);
             grid.RowCount++;
         }
 

@@ -3,7 +3,11 @@
 // A screensaver is an .exe renamed .scr that Windows starts with:
 //   /s              run full screen (on every monitor); exit on input
 //   /p <hwnd>       draw the little preview inside Screen Saver Settings
-//   /c[:<hwnd>]     show the settings dialog (also: no arguments / double-click)
+//   /c[:<hwnd>]     show the settings dialog
+// Double-clicking an .scr runs it with /S, so the same program is also shipped
+// as LMA2-Aquarium-Setup.exe: run as an .exe with no arguments it is the
+// installer (SettingsForm in setup mode; Installer.cs). /uninstall is what
+// Apps & features runs.
 // Extra modes for testing:
 //   /w              a normal 1024x768 window with the site's own UI
 //   /selftest <dir> load off-screen, wait for the tank, write status.json and
@@ -60,8 +64,14 @@ namespace Lma2Saver
                         return Saver.RunWindowed();
                     case "/selftest":
                         return Saver.RunSelfTest(rest ?? ".");
-                    default: // "/c" and anything unknown: settings
-                        Application.Run(new SettingsForm());
+                    case "/uninstall": // Apps & features
+                        Installer.ConfirmAndUninstall(null);
+                        return 0;
+                    default:
+                        // Run as an .exe (LMA2-Aquarium-Setup.exe): the installer.
+                        // As an .scr with /c (Screen Saver Settings): its settings.
+                        bool setup = !Application.ExecutablePath.EndsWith(".scr", StringComparison.OrdinalIgnoreCase);
+                        Application.Run(new SettingsForm(setup));
                         return 0;
                 }
             }
