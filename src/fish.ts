@@ -62,6 +62,13 @@ export interface FishModel {
   kind: PoseGroup["kind"];
   /** Bounding-sphere radius, in model units. */
   radius: number;
+  /**
+   * The collision radius the original keeps for this file (+0x4c): the
+   * bounding sphere that 0x431ad0 computes at load with 0x42ef70, over EVERY
+   * vertex of EVERY mesh in mesh.X (all pose meshes and the eyes, frame
+   * matrices applied), centred on the vertex centroid.
+   */
+  fileRadius: number;
   /** Nose-to-tail extent (X), in model units. */
   length: number;
   triangles: number;
@@ -87,6 +94,7 @@ export async function loadFish(entry: FishEntry, assetsUrl: string, opts: LoadOp
   const base = `${assetsUrl}fish/${entry.slug}/`;
   const textures = new XTextureCache(base);
   const doc = await loadXDoc(base + "mesh.X");
+  const fileRadius = fileSphereRadius(doc.meshes);
   const byName = new Map(doc.meshes.map((m) => [m.name, m]));
   let pg = poseGroups(doc.meshes);
 
@@ -207,7 +215,23 @@ export async function loadFish(entry: FishEntry, assetsUrl: string, opts: LoadOp
     });
   }
 
-  return { object, kind, radius: sphere.radius, length: size.x, triangles, setPhase, instance, dispose };
+  return { object, kind, radius: sphere.radius, fileRadius, length: size.x, triangles, setPhase, instance, dispose };
+}
+
+/** 0x42ef70 (callbacks 0x42e8c0 / 0x42e980): the centroid of all vertices, then the largest distance from it. */
+function fileSphereRadius(meshes: XMesh[]): number {
+  const v = new THREE.Vector3(), c = new THREE.Vector3();
+  let n = 0;
+  for (const m of meshes) {
+    for (let i = 0; i < m.positions.length; i += 3) c.add(v.fromArray(m.positions, i).applyMatrix4(m.world)), n++;
+  }
+  if (!n) return 0;
+  c.divideScalar(n);
+  let r = 0;
+  for (const m of meshes) {
+    for (let i = 0; i < m.positions.length; i += 3) r = Math.max(r, v.fromArray(m.positions, i).applyMatrix4(m.world).distanceTo(c));
+  }
+  return r;
 }
 
 // --- the original's swim animation (docs/original-logic.md 3.10) ---------------

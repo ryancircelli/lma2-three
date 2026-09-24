@@ -11,7 +11,7 @@
 // only counted inside one unbroken track.
 //
 //   deno run -A tools/probe-track.ts OUT.json [--scene 1] [--tank slug=4,...]
-//        [--warm 18] [--seconds 180] [--hz 4.5] [--seed N] [--step 0.0333]
+//        [--warm 18] [--seconds 180] [--hz 4.5] [--seed N] [--crt] [--step 0.0333]
 //        [--min 25] [--occlude]
 //
 // --occlude: hide the pixels of creatures BEHIND the foreground painting that
@@ -45,7 +45,7 @@ const THREE = await import("three");
 
 const args = parseArgs(Deno.args, {
   string: ["scene", "tank", "warm", "seconds", "hz", "school", "seed", "step", "min"],
-  boolean: ["all", "occlude"],
+  boolean: ["all", "occlude", "crt"],
   default: { scene: "1", warm: "18", seconds: "180", hz: "4.5", min: "25" },
 });
 const out = String(args._[0]);
@@ -58,7 +58,7 @@ if (args.tank) stock = Object.fromEntries(args.tank.split(",").map((e) => [e.spl
 const doc = await loadXDoc(`${root}scenes/${args.scene}/mesh.X`);
 const box = new THREE.Box3(), v = new THREE.Vector3();
 for (const m of doc.meshes) for (let i = 0; i < m.positions.length; i += 3) box.expandByPoint(v.fromArray(m.positions, i).applyMatrix4(m.world));
-const tank = new Tank(args.seed ? Number(args.seed) : undefined);
+const tank = new Tank(args.seed ? Number(args.seed) : undefined, args.crt); // --crt: the original MSVC rand() seeded with --seed
 tank.animate = false;
 if (args.school === "0") tank.schooling = false;
 tank.setView(0, (box.min.y + box.max.y) / 2, (box.max.x - box.min.x) * 0.98 / 2, (box.max.y - box.min.y) * 0.98 / 2);

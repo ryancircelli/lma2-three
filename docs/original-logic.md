@@ -311,15 +311,19 @@ interpolation, clamped to the end points). [read]
   ignored. [read] Each frame a fish's y is
   raised to at least `floor(x)`. Because of the position averaging this
   correction is soft.
-- **height** (mesh.X, mesh `height`, 7-8 points, world-transformed) is the
-  **top edge of the foreground reef painting**. Near the foreground plane
+- **height** (mesh.X, mesh `height`, 7-8 points) is read RAW, like Crab_Path
+  (see §10.1): its frame matrix is ignored, and every raw vertex has y = 0, so
+  **height(x) = 0 for every x in all three scenes** [read]. It is not the drawn
+  reef edge (the frame matrix would put it there). Near the foreground plane
   (`|z| < lim`, `lim = 0.25 * depth`) a fish must be above
   `lerp(zone.min.y, height(x), sin((1 - |z|/lim) * pi/2))`. If it is below:
   - pitch += 7*step (up to 0.9)
   - a fish currently behind the plane is held at z >= +100; one in front is
     held at z <= -100
 
-  So fish can only pass through the foreground plane above the reef silhouette.
+  So fish can only pass through the foreground plane above world y = 0: the
+  screen's middle row in scenes 1 and 3, and below the whole tank in scene 2
+  (bbox y from 3.2), where the rule never binds.
 
 ### 3.6 Staying in the zone (0x417c60, 0x4188c0)
 
@@ -961,3 +965,131 @@ one open point.
   between, not the stored position. Section 3.5 describes it as a soft
   per-frame raise. Whoever owns fish motion should confirm which values are
   written back.
+
+## 10. Addendum: randomness, the reef line and other settled points (third decomp pass)
+
+Everything here was read instruction by instruction unless tagged. The port
+(src/tank.ts, src/fish.ts, src/motes.ts) follows it.
+
+### 10.1 RNG: seeded from the clock, once [read]
+
+- `srand` (0x4455c6, stores the per-thread `_holdrand`) has ONE call site,
+  0x412483, at the top of scene init: `srand(GetTickCount())`.
+- `rand` (0x4455d3) is the MSVC CRT one: `h = h*214013 + 2531011; return
+  (h >> 16) & 0x7fff`. There are 35 direct call sites plus 24 through
+  `rand() % n` (0x417be0). No other generator exists. All calls run on the
+  main thread.
+- So the initial state is a pure function of the tick count at launch, which
+  nobody records: per-launch randomness is irreducible. After the first frame
+  the sequence also depends on frame timing (the mote draw 0x4078ba calls
+  rand() once per mote per frame; bubbles re-spawn, moods re-roll and eyes
+  re-aim on time), so even a known seed would not replay a run.
+- Startup order of rand() calls:
+  1. scene load: each class-C plant's mask phase, `rand()%20` (0x417070);
+  2. each `<fish>` element of settings.xml, IN FILE ORDER:
+     - crab: turn timer `rand()%100` (0x40b030);
+     - sea star: glass `rand()%10` (0x4210e0), spin `rand()%36` (0x420db0);
+     - sea horse: its navigator only (0x4191a0);
+     - fish: constructor 0x416400 draws front `rand()%2`, band `rand()%3`,
+       zone timer `rand()%120`; load 0x414860 draws time offset `rand()%100`,
+       then the navigator, the start pose `%80 %60 %100 %100` (0x417d10) and
+       the mood state `rand()%3`;
+  3. motes and bubbles (0x407530, 0x4084d0, 0x4086f0: 500 re-spawns of 7
+     calls each, plus the 10 s pre-simulation);
+  4. the predator roll (0x411db0).
+- Navigator (0x4191a0): `rand()%2` mode, `%120` timer, one discarded call,
+  `%20` spline u, `%45` pre-simulation steps (each step draws a variable
+  number), then `%3`, `%3`.
+- The port offers `?seed=N` / `--crt` (the exact generator, and the tank's
+  own calls in this order). It cannot reproduce a launch: plants, bubbles and
+  motes use their own streams, and the tick count is unknown.
+
+### 10.2 The reef line is world y = 0 [read]
+
+- 0x412450 builds the polyline behind 0x417200 from FindObject("height")
+  (0x41bac0 -> 0x42ea80, which matches MESH names) and
+  CD3DFileMesh::GetGeometry (vtable 0x45a2f4 slot 5 = 0x42f7a0: returns the
+  +0x60 vertex array and the +0x5c count). It copies x and y of each 32-byte
+  D3DVERTEX.
+- Frame matrices are applied only at draw time (CD3DFileFrame render
+  0x42f8e0 multiplies its +0x5c into WORLD) and in the bounding-box and
+  bounding-sphere visitors (0x42ee60, 0x42eec0). No loader function
+  transforms vertices.
+- The `height` mesh is modelled flat in its XZ plane: every raw y is 0 in
+  all three scenes. So height(x) = 0. The fish crossing rule (3.5), the
+  start-pose raise (0x417d10) and the navigator clamps (0x417e40, 0x4189b0)
+  all use world y = 0.
+- 0x417ae0 does not sort. It keeps file order: x below the first point
+  gives that point's y, x above the last gives the last y, otherwise the
+  first segment with x0 < x < x1 (strictly) is interpolated, else 0.
+  Crab_Path and height are stored in ascending x, so only an exact vertex
+  hit differs from a sorted lookup, and it returns 0.
+- Measured effect (probe-track --occlude, share of moving-fish detections
+  below the painted reef edge, 4 seeds, before -> after; reference):
+  - scene 1: 37-47 -> 46-56 % (53.0 / 56.3)
+  - scene 3: 25-42 -> 34-51 % (48.5 / 52.0)
+  - scene 2: 59-67 -> 67-76 % (63, one launch)
+
+### 10.3 Sea horse
+
+- **Pre-simulation counters** [read + inferred].
+  - 0x4191a0 writes the turn-back counter (+4) and the random pitch and yaw
+    counters (+0xe8, +0xec) only AFTER its pre-simulation loop (0x419392,
+    0x4193a0, 0x4193bc). During the 10-54 steps they hold stale heap memory.
+  - The captures show what that memory does. All 8 horses tracked at launch
+    in 3 Wine runs start level, at exactly their zone centre height (blob cy
+    246-251 px far, 330-334 px near).
+  - With zeroed counters the pre-simulation pitches the path: 0 of 90 of the
+    port's horses started level. So the counters do not fire, and the port
+    treats them as large.
+- **Caustic frame** [read]. The fish and sea-horse caustic pass (0x406050)
+  takes its frame from creature +0x6c. The fish update writes t + timeOffset
+  there (0x4151eb). The sea horse never writes it, so it keeps the base
+  constructor's 0 (0x406b4b) and always shows caustics_01.
+- **Floor** [read].
+  - The hard lower bound is the per-frame clamp in 0x41f540,
+    `M._42 >= box.min.y + 0.1*(box.max.y - box.min.y)`, with box.min.y =
+    0.8*bbox.min.y (disassembly at 0x4132af). In scene 1 that is -412.8,
+    screen y 627 for the origin.
+  - It is also the navigator's near-zone waypoint floor (0x418526). The
+    far-zone waypoint floor is -143.1, screen y 468.
+  - A screen y of 616 is therefore reachable.
+- **Floor statistics** [open].
+  - Across 5 reference launches the near-zone horses stayed above about
+    571 px (blob centroid). The port's near horses reach the floor in about
+    half of all 240 s runs.
+  - Every instruction of 0x4191a0, 0x417e40, 0x4189b0, 0x418610, 0x41f540
+    and 0x41fa30 matches the port.
+  - The remaining unknowns are stale memory: +0x68 (the sway phase, which
+    stamps forced moods) and the first mood duration. Varying either does
+    not change the depth statistics.
+
+### 10.4 Smaller points [read]
+
+- **Collision radius** (+0x4c). The fish getter (vtable +0x20, 0x4163d0)
+  returns scale * +0x4c; the sea horse's (0x406c40) returns +0x4c. It is the
+  bounding sphere that 0x431ad0 computes at load with 0x42ef70: over EVERY
+  vertex of EVERY mesh in mesh.X (pose meshes and eyes included, frame
+  matrices applied), centred on the vertex centroid (0x42e8c0, 0x42e980).
+- **Avoidance** (0x404d40).
+  - The probe is local (radius, 0, 0) through the creature's own WORLD
+    matrix, so it includes the depth scale.
+  - The obstacle radius is `2r + 1.2r` of the OTHER creature's getter
+    (settings scale x mesh radius, no depth term).
+  - It is x1.2 when that creature's aggression exceeds its own +0x7c by
+    0.001, and 0 when it is 0.001 below.
+  - Every creature is an obstacle, including invisible leaders. A leader's
+    +0x7c stays at 1.0, so it gets x1.2 against aggression-2 fish. Only a
+    leader skips itself.
+- **Motes** (0x406e10). Start and end points lie on a NINTHS grid,
+  `(rand()%10) * 0.1111` of the box, 0..1 inclusive. Then come size
+  `0.5 + 0.05*(rand()%10)` and speed `1 + 0.1*(rand()%10)`.
+- **Sea star arms** (0x41fe90, 0x420050). Each `SNFMat_Top<i>` and
+  `SNFMat_Bottom<i>` subset keeps its own bounding box. A vertex's weight is
+  `|v|^2 / |box.max - box.min|^2 - 0.4`.
+- **Fish settings** (0x412450 via 0x4066f0). `school`, `scale`, `speed`,
+  `aggression` and `behav` are read as integers from
+  FISHES/<name>/settings.xml; scale, speed and aggression are multiplied by
+  0.1. The binary holds no species names other than Anemone Crab, Sea Star
+  and Sea Horse, so there are no per-species overrides.
+  assets/manifest.json carries the files' values unchanged.

@@ -44,6 +44,21 @@ function rng(seed: number): () => number {
   };
 }
 
+/**
+ * The original's generator, exactly: MSVC CRT rand() (0x4455d3), holdrand =
+ * holdrand * 214013 + 2531011, result (holdrand >> 16) & 0x7fff; srand
+ * (0x4455c6) sets holdrand. The original calls srand ONCE, with
+ * GetTickCount(), at the top of scene init (0x412483), so every launch
+ * starts from a different, unrecorded seed.
+ */
+export function crtRand(seed: number): () => number {
+  let h = seed >>> 0;
+  return () => {
+    h = (Math.imul(h, 214013) + 2531011) >>> 0;
+    return (h >>> 16) & 0x7fff;
+  };
+}
+
 /** easeIn 0x417bf0: (sin(u pi - pi/2) + 1) / 2 (easeOut 0x417c10 = 1 - easeIn). No clamping. */
 const ease = (u: number) => (1 - Math.cos(Math.PI * u)) / 2;
 
@@ -59,22 +74,22 @@ interface Box {
 type V3 = { x: number; y: number; z: number };
 
 /**
- * 0x417ae0: linear interpolation along a polyline sorted by x, clamped to its
- * ends. (The original returns 0 when x lands exactly on an inner vertex: a
- * measure-zero quirk, not reproduced.)
+ * 0x417ae0, exactly: the points in their STORED order (never sorted);
+ * x < p[0].x gives p[0].y, x > p[last].x gives p[last].y, otherwise the
+ * first segment with p[i].x < x < p[i+1].x is interpolated, and if none
+ * matches (x exactly on a vertex, or points out of order) the result is 0.
  */
 function polyline(pts: [number, number][]): (x: number) => number {
-  pts.sort((a, b) => a[0] - b[0]);
   return (x) => {
     if (!pts.length) return -Infinity;
-    if (x <= pts[0][0]) return pts[0][1];
-    for (let i = 1; i < pts.length; i++) {
-      if (x <= pts[i][0]) {
-        const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
-        return y0 + (y1 - y0) * (x - x0) / (x1 - x0 || 1);
-      }
+    if (x < pts[0][0]) return pts[0][1];
+    const n = pts.length;
+    if (!(x <= pts[n - 1][0])) return pts[n - 1][1];
+    for (let i = 0; i < n - 1; i++) {
+      const [x0, y0] = pts[i], [x1, y1] = pts[i + 1];
+      if (x0 < x && x < x1) return (y1 - y0) * ((x - x0) / (x1 - x0)) + y0;
     }
-    return pts[pts.length - 1][1];
+    return 0;
   };
 }
 
@@ -110,7 +125,11 @@ interface SceneData {
   floor: (x: number) => number;
   /** The crab's and sea star's line: the same points at y = bbox.min.y + 0.15 H + p.y - 80, sorted by x. */
   walkPath: [number, number][];
-  /** Top edge of the foreground reef painting (mesh `height`). */
+  /**
+   * The line fish must clear to cross the foreground plane (0x415150, 0x417d10,
+   * 0x417e40, 0x4189b0): mesh `height` read RAW, i.e. 0 for every x in all
+   * three scenes (see setScene) - not the drawn reef edge.
+   */
   height: (x: number) => number;
 }
 
@@ -269,7 +288,8 @@ interface Star {
   walk: PathWalker;
   plus: boolean; // +0xb4: walking toward +x
   yaw: number; // +0xac, D3D sense
-  arms: { mesh: THREE.Mesh; base: Float32Array; arms: { verts: number[]; axis: THREE.Vector3; diag2: number }[] } | null;
+  /** Per arm: its vertices, and per vertex the squared bbox diagonal of its material subset (Top<i> or Bottom<i>). */
+  arms: { mesh: THREE.Mesh; base: Float32Array; arms: { verts: number[]; diag2: number[] }[] } | null;
 }
 
 /** Scene clear colours (docs/original-logic.md 2.3): the sea horse's fog colour. */
@@ -277,29 +297,6 @@ const WATER: Record<string, number> = { "1": 0x008aff, "2": 0x00cbfd, "3": 0x036
 
 /** The crab's walk phase counts pose FRAMES: pose int(phase)%12+1 blended into the next. */
 const CRAB_FRAMES = 12;
-
-/** Bounding sphere as the original computes it (0x42ef70): max distance from the vertex centroid. */
-function meshRadius(object: THREE.Object3D): number {
-  object.updateMatrixWorld(true);
-  const inv = object.matrixWorld.clone().invert();
-  const pts: THREE.Vector3[] = [];
-  const c = new THREE.Vector3();
-  object.traverse((o) => {
-    if (!(o instanceof THREE.Mesh) || o.name === "crab-shadow") return;
-    const p = o.geometry.getAttribute("position");
-    const m = inv.clone().multiply(o.matrixWorld);
-    for (let i = 0; i < p.count; i++) {
-      const v = new THREE.Vector3().fromBufferAttribute(p, i).applyMatrix4(m);
-      pts.push(v);
-      c.add(v);
-    }
-  });
-  if (!pts.length) return 0;
-  c.divideScalar(pts.length);
-  let r = 0;
-  for (const v of pts) r = Math.max(r, v.distanceTo(c));
-  return r;
-}
 
 export class Tank {
   /** Creatures in FRONT of the foreground painting (drawn last). */
@@ -319,8 +316,7 @@ export class Tank {
   private crabs: Crab[] = [];
   private stars: Star[] = [];
   private models = new Map<string, FishModel>();
-  private radii = new Map<string, number>();
-  private random: () => number;
+  private randInt: () => number;
   private data: SceneData | null = null;
   private sceneId: string | null = null;
   private t = 0;
@@ -332,8 +328,17 @@ export class Tank {
   /** Mesh animation on (off only for headless measurement: tools/probe-ours.ts). */
   animate = true;
 
-  constructor(seed = 20260923) {
-    this.random = rng(seed);
+  /**
+   * `crt`: draw from the original's MSVC rand() seeded with `seed` (the
+   * GetTickCount value of a launch: ?seed=); otherwise a mulberry32 stream
+   * (the fixed default, and the tools' --seed).
+   */
+  constructor(seed = 20260923, crt = false) {
+    if (crt) this.randInt = crtRand(seed);
+    else {
+      const r = rng(seed);
+      this.randInt = () => Math.floor(r() * 32768);
+    }
     // [render2] Lighting, fog and blending are the original's fixed-function pipeline,
     // per creature class, in the materials themselves (src/fixedfunction.ts,
     // applied in model()): fish L2 over ambient 0xAA with specular; the sea
@@ -356,17 +361,26 @@ export class Tank {
     const doc = await loadXDoc(base + "mesh.X");
     const bbox: Box = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, minZ: Infinity, maxZ: -Infinity };
     const v = new THREE.Vector3();
+    // The reef line (`height`) is read like Crab_Path: 0x412450 fetches the
+    // mesh with FindObject (0x41bac0 -> 0x42ea80) and copies the RAW vertex
+    // array that CD3DFileMesh::GetGeometry (0x42f7a0: +0x60 vertices, +0x5c
+    // count) returns, x and y of each 32-byte D3DVERTEX, in file order. The
+    // .X frame matrix is applied only at draw time (CD3DFileFrame render
+    // 0x42f8e0 multiplies +0x5c into WORLD), never baked. The height mesh is
+    // modelled flat in its XZ plane (every raw y is 0; the frame rotates it
+    // upright), so in the original height(x) = 0 everywhere [read].
     let heightPts: [number, number][] = [];
     for (const m of doc.meshes) {
-      const pts: [number, number][] = [];
       for (let i = 0; i < m.positions.length; i += 3) {
         v.fromArray(m.positions, i).applyMatrix4(m.world);
         bbox.minX = Math.min(bbox.minX, v.x), bbox.maxX = Math.max(bbox.maxX, v.x);
         bbox.minY = Math.min(bbox.minY, v.y), bbox.maxY = Math.max(bbox.maxY, v.y);
         bbox.minZ = Math.min(bbox.minZ, v.z), bbox.maxZ = Math.max(bbox.maxZ, v.z);
-        pts.push([v.x, v.y]);
       }
-      if (m.name === "height") heightPts = pts;
+      if (m.name === "height") {
+        heightPts = [];
+        for (let i = 0; i < m.positions.length; i += 3) heightPts.push([m.positions[i], m.positions[i + 1]]);
+      }
     }
     const H = bbox.maxY - bbox.minY;
     // Crab_Path is NOT baked to world: its RAW vertices are used, frame ignored.
@@ -377,13 +391,15 @@ export class Tank {
       if (crab) for (let i = 0; i < crab.positions.length; i += 3) raw.push([crab.positions[i], crab.positions[i + 1]]);
     } catch { /* no path.X */ }
     if (raw.length < 4) raw = [[bbox.minX, 0], [bbox.minX / 3, 0], [bbox.maxX / 3, 0], [bbox.maxX, 0]];
-    raw.sort((p, q) => p[0] - q[0]);
+    // the fish floor keeps the file order (0x412450 -> 0x417ae0); the crab's
+    // and sea star's walk list is sorted by x in their own loaders
+    const sorted = [...raw].sort((p, q) => p[0] - q[0]);
     const Ay = bbox.minY + 0.15 * H;
     this.data = {
       bbox,
       bounds: { ...bbox, minY: bbox.minY * 0.8, maxZ: bbox.maxZ * 0.8 },
       floor: polyline(raw.map(([x, y]) => [x, y + Ay - 30])),
-      walkPath: raw.map(([x, y]) => [x, y + Ay - 80]),
+      walkPath: sorted.map(([x, y]) => [x, y + Ay - 80]),
       height: polyline(heightPts.length ? heightPts : [[0, bbox.minY]]),
     };
     this.sceneId = id;
@@ -398,14 +414,13 @@ export class Tank {
 
   /** MSVC-style rand(): 0..32767. */
   private rand(): number {
-    return Math.floor(this.random() * 32768);
+    return this.randInt();
   }
 
   private async model(entry: FishEntry, assetsUrl: string): Promise<FishModel> {
     let m = this.models.get(entry.slug);
     if (!m) {
       m = await loadFish(entry, assetsUrl, { recentre: false }); // [render2] raw .X origins, as the original draws them
-      this.radii.set(entry.slug, meshRadius(m.object)); // before the shadow quad goes in
       applyFixedFunction(m.object, m.kind === "swim" ? FISH : m.kind === "sway" ? HORSE : FLOOR); // [render2] D3D6 lighting and blending
       applyCreatureCaustics(m.object, m.kind, assetsUrl); // caustics hook: caustic / causticonfish pass
       if (m.kind === "cycle") attachCrabShadow(m.object, assetsUrl); // caustics hook: crab shadow (after caustics)
@@ -453,9 +468,14 @@ export class Tank {
       this.scene.add(holder);
     }
     // Fish constructor 0x416400 + load 0x414860; sea horse 0x41f260 + 0x41f330.
+    // rand() in the original's order: the fish constructor 0x416400 draws the
+    // front flag, the band and the zone timer; the load 0x414860 draws the
+    // time offset, then the navigator (0x4191a0) and the start pose (0x417d10)
+    // in spawn(), then the mood state. The sea horse (0x41f260 / 0x41f330)
+    // draws only for its navigator; its front flag is the base constructor's 1.
     const front = horse ? true : (this.rand() & 1) > 0;
     const band = horse ? 0 : this.rand() % 3;
-    const modeTimer = this.rand() % 120 + 10;
+    const modeTimer = horse ? 0 : this.rand() % 120 + 10;
     const timeOffset = horse ? 0 : (this.rand() % 100) * 0.1;
     const f: Fish = {
       species: entry.slug,
@@ -468,14 +488,14 @@ export class Tank {
       aggRef: 1, // base constructor 0x406ae0
       behav: b.behav ?? 1,
       school: (b.school ?? 0) > 0,
-      meshR: this.radii.get(entry.slug) ?? model.radius,
+      meshR: model.fileRadius, // +0x4c: the whole-file bounding sphere (0x431ad0 -> 0x42ef70)
       isLeader,
       leader,
       timeOffset,
       tt: timeOffset,
       sa: horse ? 1 : 2,
       // first duration: uninitialised memory in the original [unknown] - expires at once
-      sm: horse ? { state: 0, start: 0, duration: 0, max: 4 } : { state: this.rand() % 3, start: timeOffset, duration: 0, max: 4 },
+      sm: { state: 0, start: timeOffset, duration: 0, max: 4 }, // a fish draws its state after spawn(), below
       mode: 0,
       modeTimer,
       pos: new THREE.Vector3(),
@@ -506,9 +526,12 @@ export class Tank {
       swayPhase: 0, // +0x68 is never initialised for the sea horse [unknown]; 0
       nav: null,
       sway: null,
-      // [render2] a fish's caustic frame runs on its own clock; the sea horse's
-      // pass reads a field of its own class [unknown] and stays on the scene's
-      caustic: inst && !horse ? ownCausticClock(inst.object) : null,
+      // [render2] the caustic frame of the fish/sea-horse pass (0x406050) is
+      // picked from the creature's +0x6c: the fish writes t + timeOffset there
+      // (0x4151eb); the sea horse never writes it, so it keeps the base
+      // constructor's 0 (0x406b4b) and shows caustics_01 forever [read]. f.tt
+      // is 0 for a sea horse throughout (updateHorse never sets it).
+      caustic: inst ? ownCausticClock(inst.object) : null,
     };
     if (horse && inst) {
       inst.object.traverse((o) => {
@@ -520,6 +543,7 @@ export class Tank {
     this.fish.push(f);
     this.roster.push(f);
     if (this.data) this.spawn(f);
+    if (!horse) f.sm.state = this.rand() % 3; // 0x414860, after the start pose
     return f;
   }
 
@@ -580,10 +604,21 @@ export class Tank {
       centre: new THREE.Vector3(),
       P: [],
       u: 0,
-      // turnBack and the two counters are uninitialised during the pre-simulation [unknown]
+      // 0x4191a0 writes neither +4 (turnBack) nor +0xe8 / +0xec (the random
+      // pitch / yaw counters) before its pre-simulation loop (it sets the
+      // counters to rand()%3 only AFTER it, at 0x4193a0 / 0x4193bc): they hold
+      // stale heap memory [read]. What that memory holds is not in the code,
+      // but the captures pin it down [inferred]: all 8 sea horses tracked at
+      // launch in 3 Wine runs (r2/sp/sea-horse, r3/ref/horse-b, horse-c) start
+      // LEVEL, at exactly their zone's centre height (blob cy 246-251 px far,
+      // 330-334 px near; zone centres 257 / 345 px at the origin). With zeroed
+      // counters the pre-simulation pitches the path (0 of 90 of our horses
+      // started level), so the counters must be positive and larger than the
+      // number of in-zone pre-simulation steps: no random turns before launch.
+      // turnBack stays -1: the captures do not constrain it.
       turnBack: -1,
-      cntV: 0,
-      cntH: 0,
+      cntV: Number.MAX_SAFE_INTEGER,
+      cntH: Number.MAX_SAFE_INTEGER,
       flipPending: false,
       timer: 0,
     };
@@ -838,26 +873,27 @@ export class Tank {
     st.walk.u = 0;
   }
 
-  /** The five arms (materials Top<i>/Bottom<i>): vertex lists, axis and reach. */
+  /**
+   * The five arms (materials SNFMat_Top<i> / SNFMat_Bottom<i>, 0x420db0): each
+   * material subset keeps its own bounding box (0x41fe90), and a vertex's
+   * weight divides by that box's squared diagonal (0x420050) [read].
+   */
   private prepareArms(mesh: THREE.Mesh): Star["arms"] {
     const g = mesh.geometry = mesh.geometry.clone();
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     const P = (g.getAttribute("position") as THREE.BufferAttribute).array as Float32Array;
-    const arms = new Map<string, { verts: number[]; axis: THREE.Vector3; diag2: number }>();
+    const arms = new Map<string, { verts: number[]; diag2: number[] }>();
     for (const gr of g.groups) {
       const m = /(?:Top|Bottom)(\d)/.exec(mats[gr.materialIndex ?? 0]?.name ?? "");
       if (!m) continue;
-      const a = arms.get(m[1]) ?? { verts: [], axis: new THREE.Vector3(), diag2: 0 };
-      for (let v = gr.start; v < gr.start + gr.count; v++) a.verts.push(v);
-      arms.set(m[1], a);
-    }
-    for (const a of arms.values()) {
-      for (const v of a.verts) {
-        const x = P[v * 3], z = P[v * 3 + 2];
-        a.axis.x += x, a.axis.z += z;
-        a.diag2 = Math.max(a.diag2, x * x + P[v * 3 + 1] ** 2 + z * z);
+      const a = arms.get(m[1]) ?? { verts: [], diag2: [] };
+      const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+      for (let v = gr.start; v < gr.start + gr.count; v++) {
+        for (let k = 0; k < 3; k++) lo[k] = Math.min(lo[k], P[v * 3 + k]), hi[k] = Math.max(hi[k], P[v * 3 + k]);
       }
-      a.axis.normalize();
+      const d2 = (hi[0] - lo[0]) ** 2 + (hi[1] - lo[1]) ** 2 + (hi[2] - lo[2]) ** 2;
+      for (let v = gr.start; v < gr.start + gr.count; v++) a.verts.push(v), a.diag2.push(d2);
+      arms.set(m[1], a);
     }
     mesh.frustumCulled = false;
     return { mesh, base: P.slice(), arms: [...arms.entries()].sort().map(([, a]) => a) };
@@ -878,22 +914,22 @@ export class Tank {
     const p = s.walk.sample();
     s.holder.position.set(p.x, p.y + (s.glass ? 100 : 0), -b.minZ);
     // arms curl: s = sin(0.2 t + i pi/4); lifted by w|5s|, turned about Y by
-    // w*0.5s, with w = max(0, |v|^2/diag^2 - 0.4) (diag: taken as the arm's reach [inferred])
+    // w*0.5s, with w = max(0, |v|^2/diag^2 - 0.4), diag = the subset's bbox diagonal (0x420050)
     if (!s.arms || !this.animate) return;
     const attr = s.arms.mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
     const P = attr.array as Float32Array, B = s.arms.base;
     P.set(B);
     s.arms.arms.forEach((a, i) => {
       const sn = Math.sin(0.2 * t + i * Math.PI / 4), lift = Math.abs(5 * sn);
-      for (const v of a.verts) {
+      a.verts.forEach((v, j) => {
         const x = B[v * 3], y = B[v * 3 + 1], z = B[v * 3 + 2];
-        const w = Math.max(0, (x * x + y * y + z * z) / a.diag2 - 0.4);
-        if (!w) continue;
+        const w = Math.max(0, (x * x + y * y + z * z) / a.diag2[j] - 0.4);
+        if (!w) return;
         const ang = w * 0.5 * sn, c = Math.cos(ang), si = Math.sin(ang); // about the star's Y
         P[v * 3] = x * c + z * si;
         P[v * 3 + 1] = y + w * lift;
         P[v * 3 + 2] = -x * si + z * c;
-      }
+      });
     });
     attr.needsUpdate = true;
   }
