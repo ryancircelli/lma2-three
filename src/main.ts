@@ -29,6 +29,7 @@ import { type FishEntry, type FishModel, loadFish } from "./fish.ts";
 import { ambience } from "./audio.ts";
 import { setFixedFunctionFog } from "./fixedfunction.ts";
 import { fishPicker, fullTank, stockParam } from "./fishpicker.ts";
+import { loadingScreen } from "./loading.ts";
 import { loadScene, nextRotationScene, type SceneModel } from "./scene.ts";
 import { Tank } from "./tank.ts";
 import { Effects } from "./effects.ts"; // --- effects: bubbles, light rays, light motes
@@ -72,6 +73,10 @@ if (params.get("clean") === "1") document.body.classList.add("clean");
 // cursor, but unlike ?clean=1 it keeps sound and the per-launch random seed.
 if (params.get("saver") === "1") document.body.classList.add("clean", "saver");
 
+// The original's splash while models and textures load (loading.ts); not for
+// reference captures (?clean=1), which must see the tank itself.
+const loading = loadingScreen(params.get("clean") !== "1");
+
 // --- renderer ----------------------------------------------------------------
 
 const canvas = document.querySelector<HTMLCanvasElement>("#view")!;
@@ -97,6 +102,7 @@ function fail(message: string): void {
   info.textContent = `Error: ${message}`;
   info.classList.add("error");
   console.error(message);
+  loading.finish(); // don't hide the error behind the splash
 }
 
 function done(subject: string, detail: string): void {
@@ -312,6 +318,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     if (frozenT !== null) tank.simulateTo(frozenT);
     done(`scene-${select.value}`, `Scene ${select.value} · ${tank.count} creatures`);
   }
+  loading.finish(); // fades once every model and texture has arrived
   // water surface: its diffuse is the ambient light state the previous frame
   // left (surface.ts): the Foreground's 0xFF, 0x80 after the Relief caustics,
   // then whatever the last creatures drawn set (Tank.ambientLeft).
@@ -463,6 +470,7 @@ async function fishView(manifest: Manifest): Promise<(t: number) => void> {
   const initial = ordered.find((f) => f.slug === params.get("fish")) ?? ordered[0];
   select.value = initial.slug;
   await show(initial);
+  loading.finish();
 
   return (t) => {
     animate(t);

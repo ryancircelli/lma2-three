@@ -289,9 +289,20 @@ export function parseX(text: string): XDoc {
 
 /** Fetch and parse a .X file. */
 export async function loadXDoc(url: string): Promise<XDoc> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
-  return parseX(await res.text());
+  // Counted with the textures (three's DefaultLoadingManager), so the loading
+  // screen's progress covers the models too.
+  const manager = THREE.DefaultLoadingManager;
+  manager.itemStart(url);
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+    return parseX(await res.text());
+  } catch (e) {
+    manager.itemError(url);
+    throw e;
+  } finally {
+    manager.itemEnd(url);
+  }
 }
 
 // ---------------------------------------------------------------------------

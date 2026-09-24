@@ -43,12 +43,27 @@
     body.idle #panel, body.idle #info { opacity: 0; pointer-events: none; }
     body.idle, body.idle #view { cursor: none; }
     #panel, #info { transition: opacity 0.4s; }
+    /* Loading screen (loading.ts): the original's splash over black */
+    #loading {
+      position: fixed; inset: 0; z-index: 10; background: #000;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+      transition: opacity 0.6s;
+    }
+    #loading img { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 64px); object-fit: contain; }
+    #loading .bar { width: min(420px, calc(100vw - 64px)); height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.15); overflow: hidden; }
+    #loading .fill { width: 0; height: 100%; background: #4fb3ff; transition: width 0.25s; }
+    #loading.done { opacity: 0; pointer-events: none; }
+    body.saver #loading { cursor: none; }
   </style>
 </head>
 <body>
   <canvas id="view"></canvas>
   <div id="panel"></div>
   <div id="info">Loading&hellip;</div>
+  <div id="loading" aria-label="Loading">
+    <img src="assets/common/splashfull.jpg" alt="Living Marine Aquarium 2">
+    <div class="bar"><div class="fill"></div></div>
+  </div>
   <script type="module" src="dist/app.js"></script>
 </body>
 </html>
