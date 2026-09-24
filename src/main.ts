@@ -18,6 +18,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { type FishEntry, type FishModel, loadFish } from "./fish.ts";
 import { loadScene, type SceneModel } from "./scene.ts";
 import { Tank } from "./tank.ts";
+import { WaterSurface } from "./surface.ts"; // water surface
 
 interface Manifest {
   fish: FishEntry[];
@@ -136,6 +137,13 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   if (params.get("school") === "0") tank.schooling = false;
   renderer.autoClear = false;
 
+  // --- water surface (src/surface.ts): drawn in the painting's ortho pass,
+  // before the painting. ?surface=0 hides it (baseline for comparisons).
+  const surface = await WaterSurface.load(ASSETS);
+  surface.object.visible = params.get("surface") !== "0";
+  scene.add(surface.object);
+  // --- end water surface
+
   const select = document.createElement("select");
   for (const s of manifest.scenes) select.add(new Option(`Scene ${s.id}`, s.id));
   const label = document.createElement("label");
@@ -159,6 +167,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
       nearScene.remove(current.near);
       current.dispose();
     }
+    await surface.setScene(id, ASSETS); // water surface
     current = model;
     scene.add(model.object);
     nearScene.add(model.near);
@@ -191,6 +200,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   let last = 0;
   return (t) => {
     current?.update(t);
+    surface.update(t); // water surface
     if (frozenT === null) tank.update(Math.min(t - last, 0.1));
     last = t;
     renderer.clear();
