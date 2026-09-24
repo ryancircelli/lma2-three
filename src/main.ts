@@ -9,6 +9,7 @@
 //   ?size=WxH          fixed canvas size in CSS px, e.g. 1024x768 (the original's mode)
 //   ?clean=1           hide all UI and play no sound (reference comparisons)
 //   ?aa=1              MSAA on (off by default: the original has none)
+//   ?tank=<slug>:<n>,...  stock only these species;  ?bare=1  no painting (flat water)
 //   ?sound=0 / ?volume=<dB>   ambient loop off / its level (see audio.ts)
 //
 // window.lma2 exposes load state for automated checks (agent-browser eval).
@@ -215,8 +216,15 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   // ?fish=0 leaves the tank empty, for backdrop comparisons.
   if (params.get("fish") !== "0") {
     try {
-      // [feat/fish] ?all=1: one of every species (to check each one), else the configured tank.
-      const stock = params.get("all") === "1" ? Object.fromEntries(manifest.fish.map((f) => [f.slug, 1])) : manifest.tank;
+      // [feat/fish] ?all=1: one of every species (to check each one);
+      // ?tank=<slug>:<n>,... only these (like tools/wine-ref.sh LMA2_TANK);
+      // else the configured tank.
+      const only = params.get("tank")?.split(",").map((e) => e.split(":")).filter((e) => e[0]);
+      const stock = params.get("all") === "1"
+        ? Object.fromEntries(manifest.fish.map((f) => [f.slug, 1]))
+        : only?.length
+        ? Object.fromEntries(only.map(([slug, n]) => [slug, Number(n ?? 1)]))
+        : manifest.tank;
       await tank.populate(manifest.fish, stock, ASSETS);
     } catch (e) {
       fail(`fish: ${(e as Error).message}`);
@@ -234,10 +242,13 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   // FRONT of it, over everything; light motes; depth cleared, a sea star on
   // the glass last. Depth is cleared only where the original clears it:
   // bubbles (pass 1) write depth and so hide back creatures behind them.
+  // ?bare=1: no painting and no water surface - creatures on the flat clear
+  // colour, like tools/wine-ref.sh LMA2_BARE=1 (add rays=0&bubbles=0&caustics=0).
+  const bare = params.get("bare") === "1";
   const paint = (pass: 0 | 1) => {
     if (current) {
-      current.back.visible = pass === 0;
-      current.front.visible = pass === 1;
+      current.back.visible = pass === 0 && !bare;
+      current.front.visible = pass === 1 && !bare;
     }
     const water = scene.background; // a colour background clears: only on pass 0
     if (pass === 1) scene.background = null;

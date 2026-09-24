@@ -296,6 +296,9 @@ export function applyFishCaustics(
           // Original world: X as ours, Z mirrored.
           vec2 d3dUv = vec2(-vCausticWorld.z, vCausticWorld.x) * causticScale + causticOffset * causticScroll;
           float lit = causticAmbient + causticLight * max(normalize(vCausticNormal).y, 0.0);
+          #ifdef FFP_LIGHTING
+          lit *= vFfpFog; // an additive pass: its fog colour is black (fixedfunction.ts)
+          #endif
           gl_FragColor.rgb += causticSample(d3dUv) * lit;
         }`,
       );

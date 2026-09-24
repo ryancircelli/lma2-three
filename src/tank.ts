@@ -34,6 +34,7 @@ import { type FishEntry, type FishInstance, type FishModel, loadFish } from "./f
 import { loadXDoc } from "./xloader.ts";
 import { applyCreatureCaustics } from "./caustics.ts"; // caustics hook
 import { attachCrabShadow } from "./shadow.ts"; // caustics hook (crab shadow)
+import { applyFixedFunction, FISH, FLOOR, HORSE, setFixedFunctionScene } from "./fixedfunction.ts";
 
 /** Small seedable PRNG (mulberry32), so a given ?t= always shows the same frame. */
 function rng(seed: number): () => number {
@@ -237,26 +238,11 @@ export class Tank {
 
   constructor(seed = 20260923) {
     this.random = rng(seed);
-    // Lighting, from the original (docs/original-logic.md 2.4): fish get light
-    // L2 (direction (0,-1,0.2)) at full strength over a 0.667 ambient; the crab
-    // and sea star L1 (straight down) over a 0.5 ambient. D3D lights in gamma
-    // space and saturates at 1; three.js lights linear colour, so intensities
-    // are matched at the visible flank (N.L = 0.2) and underside:
-    // a -> a^2.2, a + 0.2 d -> (a + 0.2)^2.2; x PI as three's Lambert divides by PI.
-    for (const s of [this.floor, this.glass]) s.add(new THREE.AmbientLight(0xffffff, 0.218 * Math.PI));
-    // Fish are drawn with ambient 0xaa (0.667 -> 0.41 linear; flank 0.86 -> 0.72).
-    for (const s of [this.scene, this.behind]) s.add(new THREE.AmbientLight(0xffffff, 0.41 * Math.PI));
-    for (const s of [this.scene, this.behind]) {
-      s.fog = this.fog;
-      const l2 = new THREE.DirectionalLight(0xffffff, 1.6 * Math.PI);
-      l2.position.set(0, 1, 0.2); // light travels (0,-1,0.2) in .X space = (0,-1,-0.2) here
-      s.add(l2);
-    }
-    for (const s of [this.floor, this.glass]) {
-      const l1 = new THREE.DirectionalLight(0xffffff, 0.78 * Math.PI);
-      l1.position.set(0, 1, 0);
-      s.add(l1);
-    }
+    // Lighting, fog and blending are the original's fixed-function pipeline,
+    // per creature class, in the materials themselves (src/fixedfunction.ts,
+    // applied in model()): fish L2 over ambient 0xAA with specular; the sea
+    // horse L2 over 0x80; the crab and sea star L1 over 0x80. The scenes hold
+    // no three.js lights.
   }
 
   /** Match the painting's orthographic view (called on every resize). */
@@ -308,6 +294,7 @@ export class Tank {
     this.fog.color.setHex(WATER[id] ?? 0);
     this.fog.near = 10000;
     this.fog.far = 10000 + 2 * bbox.maxZ;
+    setFixedFunctionScene({ bbox, fogColor: WATER[id] ?? 0, fogNear: this.fog.near, fogFar: this.fog.far });
     for (const f of this.fish) this.spawn(f);
     const W = bbox.maxX - bbox.minX;
     for (const c of this.crabs) {
@@ -336,6 +323,7 @@ export class Tank {
     let m = this.models.get(entry.slug);
     if (!m) {
       m = await loadFish(entry, assetsUrl);
+      applyFixedFunction(m.object, m.kind === "swim" ? FISH : m.kind === "sway" ? HORSE : FLOOR); // D3D6 lighting and blending
       applyCreatureCaustics(m.object, m.kind, assetsUrl); // caustics hook: caustic / causticonfish pass
       if (m.kind === "cycle") attachCrabShadow(m.object, assetsUrl); // caustics hook: crab shadow (after caustics)
       this.models.set(entry.slug, m);

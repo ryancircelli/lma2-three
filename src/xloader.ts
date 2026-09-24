@@ -479,6 +479,7 @@ function makeMaterial(m: XMaterial | null, textures: XTextureCache | null): THRE
     map,
     side: THREE.DoubleSide,
   });
+  mat.userData.xAlpha = m.opacity; // (the tank's creatures use it: fixedfunction.ts)
   // Fins and tails carry their outline in the DXT3 alpha channel. Cut it out
   // rather than blend, so there is no draw order to get wrong between parts.
   if (map) mat.alphaTest = 0.3;
