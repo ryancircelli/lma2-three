@@ -21,10 +21,16 @@ namespace Lma2Saver
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LMA2Screensaver"); }
         }
 
-        /// <summary>WebView2's profile (localStorage keeps the scene rotation between runs).</summary>
-        public static string ProfileDir
+        /// <summary>
+        /// WebView2 profiles, one per mode. Windows keeps the little /p preview
+        /// running while Screen Saver Settings is open, and starts /s (Preview,
+        /// or the real thing) alongside it; two processes sharing one profile
+        /// fail with 0x8007139F, which showed as a black flash and an exit.
+        /// "profile" (the full-screen one) keeps the scene rotation.
+        /// </summary>
+        public static string ProfileDir(string mode)
         {
-            get { return Path.Combine(DataDir, "profile"); }
+            return Path.Combine(DataDir, mode == "saver" ? "profile" : "profile-" + mode);
         }
 
         private static byte[] Read(string name)
@@ -73,7 +79,7 @@ namespace Lma2Saver
             foreach (string d in Directory.GetDirectories(DataDir))
             {
                 if (string.Equals(d, dir, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(d, ProfileDir, StringComparison.OrdinalIgnoreCase)) continue;
+                    Path.GetFileName(d).StartsWith("profile", StringComparison.OrdinalIgnoreCase)) continue;
                 try { Directory.Delete(d, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             }
             return dir;

@@ -162,7 +162,20 @@ namespace Lma2Saver
 
         private static void CopySelf(string dest)
         {
-            File.Copy(Application.ExecutablePath, dest, true);
+            try
+            {
+                File.Copy(Application.ExecutablePath, dest, true);
+            }
+            catch (IOException) when (File.Exists(dest))
+            {
+                // The installed copy is running (e.g. the preview in an open Screen Saver
+                // Settings). A running file can be renamed but not overwritten: move it
+                // aside, copy the new one in, and delete the old one at the next reboot.
+                string old = dest + ".old-" + DateTime.Now.Ticks;
+                File.Move(dest, old);
+                File.Copy(Application.ExecutablePath, dest, true);
+                if (!Native.DeleteFile(old)) Native.MoveFileEx(old, null, Native.MOVEFILE_DELAY_UNTIL_REBOOT);
+            }
             // The download's "from the internet" mark would make Windows ask
             // before every start; the user has just chosen to install it.
             Native.DeleteFile(dest + ":Zone.Identifier");

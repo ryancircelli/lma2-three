@@ -51,12 +51,27 @@ namespace Lma2Saver
             }
             if (mode.StartsWith("-")) mode = "/" + mode.Substring(1);
 
+            Log.Start(mode, args);
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += (s, e) =>
+            {
+                Log.Error("UI thread", e.Exception);
+                Saver.Exit();
+            };
+            AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+            {
+                if (e.ExceptionObject is Exception ex) Log.Error("unhandled", ex);
+            };
+
             try
             {
                 switch (mode)
                 {
                     case "/s":
                         return Saver.RunFullScreen();
+                    case "/stest": // the /s code path in one off-screen window, for testing
+                        int seconds;
+                        return Saver.RunSaverTest(rest != null && int.TryParse(rest, out seconds) ? seconds : 20);
                     case "/p":
                         long hwnd;
                         return rest != null && long.TryParse(rest, out hwnd) ? Saver.RunPreview(new IntPtr(hwnd)) : 0;
@@ -79,7 +94,8 @@ namespace Lma2Saver
             }
             catch (Exception e)
             {
-                if (mode == "/p" || mode == "/selftest") return 1; // never pop up dialogs there
+                Log.Error("start", e);
+                if (mode == "/p" || mode == "/selftest" || mode == "/stest") return 1; // never pop up dialogs there
                 MessageBox.Show(
                     "The screensaver could not start:\n\n" + e.Message +
                     "\n\nIt needs the Microsoft Edge WebView2 Runtime, which is built into Windows 10 and 11.",

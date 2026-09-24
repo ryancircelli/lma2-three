@@ -19,6 +19,7 @@ namespace Lma2Saver
 
         public static string SiteDir;
         private static bool selfTest;
+        public static bool Testing; // /stest: the saver path, off-screen and timed
         private static Task<CoreWebView2Environment> env;
 
         /// <summary>
@@ -28,12 +29,13 @@ namespace Lma2Saver
         /// </summary>
         public const string ExitScript = @"(() => {
   const t0 = performance.now(); let origin = null;
-  const exit = () => { if (performance.now() - t0 > 1000) window.chrome.webview.postMessage('exit'); };
+  const exit = (why) => { if (performance.now() - t0 > 1000) window.chrome.webview.postMessage('exit:' + why); };
   addEventListener('mousemove', (e) => {
     if (!origin) { origin = [e.screenX, e.screenY]; return; }
-    if (Math.hypot(e.screenX - origin[0], e.screenY - origin[1]) > 120) exit();
+    const d = Math.hypot(e.screenX - origin[0], e.screenY - origin[1]);
+    if (d > 120) exit('mouse moved ' + Math.round(d) + ' px');
   }, true);
-  for (const type of ['keydown', 'mousedown', 'wheel', 'touchstart']) addEventListener(type, exit, true);
+  for (const type of ['keydown', 'mousedown', 'wheel', 'touchstart']) addEventListener(type, (e) => exit(type + (e.key ? ' ' + e.key : '')), true);
 })();";
 
         private static void Prepare()
@@ -43,6 +45,9 @@ namespace Lma2Saver
             CoreWebView2Environment.SetLoaderDllFolderPath(dir);
         }
 
+        /// <summary>The WebView2 profile for this process (see Embedded.ProfileDir).</summary>
+        public static string Profile = "saver";
+
         public static Task<CoreWebView2Environment> Environment()
         {
             if (env == null)
@@ -51,18 +56,45 @@ namespace Lma2Saver
                 string args = "--autoplay-policy=no-user-gesture-required";
                 // The self-test window is off-screen: keep it rendering anyway.
                 if (selfTest) args += " --disable-features=CalculateNativeWinOcclusion --disable-renderer-backgrounding --disable-background-timer-throttling";
-                env = CoreWebView2Environment.CreateAsync(null, Embedded.ProfileDir, new CoreWebView2EnvironmentOptions(args));
+                string dir = Embedded.ProfileDir(Profile);
+                Log.Write("WebView2 runtime " + SafeVersion() + ", profile " + dir + ", args " + args);
+                env = CoreWebView2Environment.CreateAsync(null, dir, new CoreWebView2EnvironmentOptions(args));
             }
             return env;
         }
 
         private static bool exiting;
 
-        public static void Exit()
+        public static void Exit(string why = null)
         {
             if (exiting) return;
             exiting = true;
+            Log.Write("exit" + (why == null ? "" : ": " + why));
             Application.Exit();
+        }
+
+        private static string SafeVersion()
+        {
+            try { return CoreWebView2Environment.GetAvailableBrowserVersionString(); }
+            catch (Exception e) { return "NOT FOUND (" + e.Message + ")"; }
+        }
+
+        /// <summary>/stest: one Saver window off-screen for N seconds (the /s code path without taking over the display).</summary>
+        public static int RunSaverTest(int seconds)
+        {
+            selfTest = true;
+            Testing = true;
+            Profile = "test";
+            Prepare();
+            Settings s = Settings.Load();
+            var form = new SaverForm(SaverForm.Kind.Saver, new Rectangle(-4000, -4000, 1024, 768), s.Query(true, false));
+            var timer = new Timer { Interval = seconds * 1000 };
+            int result = 3; // 3: ended early (see log)
+            timer.Tick += (o, e) => { result = 0; Exit("test survived " + seconds + " s"); };
+            timer.Start();
+            form.FormClosed += (o, e) => Exit();
+            Application.Run(form);
+            return result;
         }
 
         public static int RunFullScreen()
@@ -90,6 +122,7 @@ namespace Lma2Saver
 
         public static int RunPreview(IntPtr parent)
         {
+            Profile = "preview";
             Prepare();
             var form = new SaverForm(SaverForm.Kind.Preview, Rectangle.Empty, Settings.Load().Query(false, true), parent);
             Application.Run(form);
@@ -98,6 +131,7 @@ namespace Lma2Saver
 
         public static int RunWindowed()
         {
+            Profile = "window";
             Prepare();
             Application.Run(new SaverForm(SaverForm.Kind.Window, Rectangle.Empty, "?aspect=" + Settings.Load().Aspect));
             return 0;
@@ -106,6 +140,7 @@ namespace Lma2Saver
         public static int RunSelfTest(string outDir)
         {
             selfTest = true;
+            Profile = "test";
             Prepare();
             Directory.CreateDirectory(outDir);
             // Off-screen, fixed seed and time (?clean=1&t=30), no sound.
@@ -145,7 +180,7 @@ namespace Lma2Saver
                     FormBorderStyle = FormBorderStyle.None;
                     ShowInTaskbar = false;
                     Bounds = bounds;
-                    TopMost = kind == Kind.Saver;
+                    TopMost = kind == Kind.Saver && !Saver.Testing;
                     break;
                 case Kind.Preview:
                     FormBorderStyle = FormBorderStyle.None;
@@ -193,15 +228,24 @@ namespace Lma2Saver
             {
                 // The preview process is ours to end when its host window goes away.
                 var timer = new Timer { Interval = 1000 };
-                timer.Tick += (s, a) => { if (!Native.IsWindow(previewParent)) Saver.Exit(); };
+                timer.Tick += (s, a) => { if (!Native.IsWindow(previewParent)) Saver.Exit("preview host closed"); };
                 timer.Start();
             }
             if (web == null) return;
             try
             {
                 CoreWebView2Environment environment = await Saver.Environment();
+                Log.Write(kind + ": environment ready, browser " + environment.BrowserVersionString);
                 await web.EnsureCoreWebView2Async(environment);
                 CoreWebView2 core = web.CoreWebView2;
+                Log.Write(kind + ": webview ready");
+                core.ProcessFailed += (s, a) =>
+                {
+                    Log.Write(kind + ": WebView2 process failed: " + a.ProcessFailedKind + " reason " + a.Reason + " exit " + a.ExitCode);
+                    if (kind == Kind.Saver && a.ProcessFailedKind == CoreWebView2ProcessFailedKind.BrowserProcessExited) Saver.Exit("browser process exited");
+                };
+                core.NavigationCompleted += (s, a) =>
+                    Log.Write(kind + ": page loaded " + (a.IsSuccess ? "ok" : "FAILED " + a.WebErrorStatus));
                 core.SetVirtualHostNameToFolderMapping(Saver.Host, Saver.SiteDir, CoreWebView2HostResourceAccessKind.Allow);
                 bool interactive = kind == Kind.Window;
                 core.Settings.AreDefaultContextMenusEnabled = interactive;
@@ -224,7 +268,7 @@ namespace Lma2Saver
                     {
                         string message = null;
                         try { message = a.TryGetWebMessageAsString(); } catch (ArgumentException) { }
-                        if (message == "exit") Saver.Exit();
+                        if (message != null && message.StartsWith("exit")) Saver.Exit("input: " + message.Substring(Math.Min(5, message.Length)));
                     };
                 }
                 core.Navigate("https://" + Saver.Host + "/index.html" + query);
@@ -233,7 +277,8 @@ namespace Lma2Saver
             }
             catch (Exception ex)
             {
-                if (kind == Kind.Saver || kind == Kind.Preview) { Saver.Exit(); return; }
+                Log.Error(kind + " start", ex);
+                if (kind == Kind.Saver || kind == Kind.Preview) { Saver.Exit("error: " + ex.Message); return; }
                 if (kind == Kind.SelfTest)
                 {
                     File.WriteAllText(Path.Combine(testDir, "status.json"), "{\"error\":" + Json(ex.Message) + "}");
@@ -293,19 +338,19 @@ namespace Lma2Saver
             Point p = Cursor.Position;
             if (mouseOrigin == null) { mouseOrigin = p; return; }
             int dx = p.X - mouseOrigin.Value.X, dy = p.Y - mouseOrigin.Value.Y;
-            if (Armed && dx * dx + dy * dy > 120 * 120) Saver.Exit();
+            if (Armed && dx * dx + dy * dy > 120 * 120) Saver.Exit("form: mouse moved");
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (Armed) Saver.Exit();
+            if (Armed) Saver.Exit("form: mouse button");
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
-            if (Armed) Saver.Exit();
+            if (Armed) Saver.Exit("form: key " + e.KeyCode);
         }
     }
 
@@ -327,5 +372,10 @@ namespace Lma2Saver
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern bool DeleteFile(string path);
+
+        public const uint MOVEFILE_DELAY_UNTIL_REBOOT = 0x4;
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern bool MoveFileEx(string existing, string replacement, uint flags);
     }
 }
