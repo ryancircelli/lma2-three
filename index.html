@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Living Marine Aquarium 2</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b3a52; color: #d8eef8; font: 14px/1.4 system-ui, sans-serif; overflow: hidden; }
+    #view { display: block; width: 100vw; height: 100vh; }
+    #panel {
+      position: fixed; top: 12px; left: 12px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+      padding: 10px 12px; max-width: calc(100vw - 48px);
+      background: rgba(4, 22, 34, 0.72); border: 1px solid rgba(160, 210, 240, 0.18); border-radius: 8px;
+    }
+    #panel select { font: inherit; }
+    #info { position: fixed; left: 12px; bottom: 12px; padding: 6px 10px; background: rgba(4, 22, 34, 0.72); border-radius: 6px; }
+    #info.error { color: #ffb4a8; }
+    /* ?clean=1 - nothing but the canvas, for reference comparisons */
+    body.clean #panel, body.clean #info { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="view"></canvas>
+  <div id="panel"></div>
+  <div id="info">Loading&hellip;</div>
+  <script type="module" src="dist/app.js"></script>
+</body>
+</html>

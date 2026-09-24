@@ -1,0 +1,13 @@
+# Extracted from a Living Marine Aquarium 2 install by `deno task extract`.
+# Regenerable, ~30 MB, and the assets are Freeze.com / Triodesign's - not ours
+# to redistribute.
+/assets/
+
+# Build output
+/dist/
+
+# Screenshots from `deno task shot`
+/screenshots/
+
+# Parallel agent worktrees
+/.worktrees/
