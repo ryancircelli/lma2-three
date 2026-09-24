@@ -119,14 +119,29 @@ export function nextRotationScene(ids: string[]): string {
   return ids[next];
 }
 
-/** Billboards nearer than this (D3D z) draw in front of the fish. Scene 1's
- * anemones and seaweed sit at ~-1960; its soft coral at +304 is behind. */
-const NEAR_Z = -1000;
-
 export interface SceneModel {
-  /** Handedness-corrected root: the painting and anything behind the fish. */
+  /**
+   * The whole painting, `back` then `front` (docs/original-logic.md 2.2):
+   * render this, then the creatures, for a two-layer approximation.
+   */
   object: THREE.Group;
-  /** Near billboards, drawn after (in front of) the fish. */
+  /**
+   * Scene pass 0 (handedness-corrected): the Background plane. The original
+   * draws the creatures BEHIND the foreground (frame z >= 0) after this...
+   */
+  back: THREE.Group;
+  /**
+   * ...then scene pass 1: billboards with z >= 0 (far first), the Foreground,
+   * the Relief caustics, billboards with z < 0 - all ordered by renderOrder =
+   * -z - and only then the creatures in FRONT of the foreground (z < 0), over
+   * everything here, near billboards included.
+   */
+  front: THREE.Group;
+  /**
+   * Always empty: nothing in the original is drawn over the front creatures
+   * (the old "near billboards over the fish" layer was wrong). Kept so
+   * existing callers still work.
+   */
   near: THREE.Group;
   /** The painted frame in view space (after the Z mirror): Background + Foreground. */
   frame: THREE.Box2;
@@ -278,8 +293,15 @@ export async function loadScene(id: string, assetsUrl: string, opts: SceneOption
   const textures = new XTextureCache(base);
   const doc = await loadXDoc(base + "mesh.X");
 
-  const root = handednessRoot();
+  // Pass 0 (Background) and pass 1 (everything else), both mirrored for
+  // handedness; `root` holds them in that order.
+  const back = handednessRoot();
+  back.name = `scene-${id}-back`;
+  const front = handednessRoot();
+  front.name = `scene-${id}-front`;
+  const root = new THREE.Group();
   root.name = `scene-${id}`;
+  root.add(back, front);
   const billboards: Billboard[] = [];
   const frame3 = new THREE.Box3();
   const table = BILLBOARDS[id] ?? {};
@@ -290,16 +312,15 @@ export async function loadScene(id: string, assetsUrl: string, opts: SceneOption
   // rotations, which is exactly how shear arises.
   const near = handednessRoot();
   near.name = `scene-${id}-near`;
-  // Nothing writes depth, so draw order IS the layering: far to near by the
-  // frame's D3D z (larger = farther). Measured in scene 2, whose sea whips
-  // (z 89) stand between Background (2598) and Foreground (0): the reference
-  // hides their stems behind the foreground coral. `sub` orders a billboard's
-  // two layers.
-  const place = (obj: THREE.Mesh, m: XMesh, sub = 0) => {
+  // Nothing writes depth, so draw order IS the layering: far to near by D3D z
+  // (larger = farther; original-logic.md 5.3). Also measured: scene 2's sea
+  // whips (z 89) stand between Background (2598) and Foreground (0), and the
+  // reference hides their stems behind the foreground coral; scene 1's soft
+  // coral (z 304) likewise. Billboards set renderOrder the same way.
+  const place = (obj: THREE.Mesh, m: XMesh) => {
     obj.geometry.applyMatrix4(m.world);
-    const z = m.world.elements[14];
-    obj.renderOrder = -z + sub * 0.01;
-    (z < NEAR_Z ? near : root).add(obj);
+    obj.renderOrder = -m.world.elements[14];
+    (m.name === "Background" ? back : front).add(obj);
   };
 
   // The camera's box: all vertices, drawn or not (X/Y are unaffected by the Z mirror).
@@ -345,7 +366,7 @@ export async function loadScene(id: string, assetsUrl: string, opts: SceneOption
         const obj = new THREE.Mesh(billboardQuad(base), mat);
         obj.name = `${m.name}/${sub ? "B" : "A"}`;
         obj.renderOrder = -z + sub * 0.01; // far to near (see place()); layer A, then B
-        (z < NEAR_Z ? near : root).add(obj);
+        front.add(obj);
         return obj;
       };
       const bb: Billboard = { cls: def.cls, base, a: mk(def.tex[0], 0), b: mk(def.tex[1], 1) };
@@ -390,7 +411,7 @@ export async function loadScene(id: string, assetsUrl: string, opts: SceneOption
   update(0);
 
   function dispose(): void {
-    for (const r of [root, near]) r.traverse((o) => {
+    root.traverse((o) => {
       if (!(o instanceof THREE.Mesh)) return;
       o.geometry.dispose();
       for (const mat of Array.isArray(o.material) ? o.material : [o.material]) {
@@ -402,5 +423,5 @@ export async function loadScene(id: string, assetsUrl: string, opts: SceneOption
   }
 
   const clearColor = new THREE.Color().setHex(CLEAR_COLOR[id] ?? CLEAR_COLOR["1"], THREE.SRGBColorSpace);
-  return { object: root, near, frame, bounds, clearColor, update, dispose };
+  return { object: root, back, front, near, frame, bounds, clearColor, update, dispose };
 }

@@ -168,6 +168,10 @@ ImageMagick one-liners used constantly:
 - Tiles are clamped (repeat wrapping produced seam lines).
 - Draw order is far-to-near by frame z; nothing writes depth. So billboards with
   z > 0 (scene 1 soft coral, scene 2 sea whips) are hidden behind the Foreground.
+  SceneModel exposes the original's two passes: `back` (Background) and `front`
+  (billboards, Foreground, Relief, near billboards). Creatures behind the
+  foreground go between them, creatures in front go after `front` - over the
+  near billboards too (`near` is now always empty; original-logic.md 2.2).
 - **Billboards**: the table (textures, class, bbox edit) is hard-coded in one
   setup function per scene (.scr 0x41dc90 / 0x41d3a0 / 0x41e5c0) - see
   `BILLBOARDS` in scene.ts. Each is a quad over its frame's world bbox, with a
