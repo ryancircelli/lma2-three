@@ -43,6 +43,8 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # The action's default wrangler (3.x) predates wrangler.jsonc and run_worker_first.
+          wranglerVersion: "4.137.0"
           command: deploy
 
       - name: Deploy skipped
