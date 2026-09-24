@@ -833,3 +833,45 @@ Application
   `caust00`/`caustics_00`, the perspective matrix at this+0x580, and a 4 s
   WM_CLOSE timer in a base-class code path the LMA path does not take. (The
   scene-3 `Anemone-*` and `Blue anemones-*` textures ARE used; see 5.3.)
+
+---
+
+## 8. Addendum: scenery cross-check (second decomp pass)
+
+A second, independent pass over the scenery and effects code (sections 2 and 5)
+agrees with everything above. Below are only the corrections and the details
+the sections above leave out.
+
+- **Fish ambient is 0xAAAAAAAA, not 0.5** [read]. Right before the body is
+  drawn, the fish draw (0x416710, at 0x41691d) sets `LIGHTSTATE_AMBIENT =
+  0xAAAAAAAA` (about 0.67 grey) and `SPECULARENABLE = 1`. It restores
+  0x80808080 and specular off afterwards (3.11). So the "0.5 ambient" in 2.4
+  holds for scenery but not for fish bodies. Just before this, the same function
+  draws a small unlit triangle list (FVF 0x1E2). Its purpose was not examined.
+- **Billboard class D, exact corners** (0x402260) [read]. Layer -0: top-left
+  x += 5cs, top-right x -= 5s². Layer -1: bottom-left x -= 10cs, top-left
+  x += 10cs, top-right x -= 10s², bottom-right x += 10s². The layer -1 quad
+  therefore rocks as a parallelogram about its middle.
+- **Billboard class A clamps** U and V (`ADDRESSU/V = CLAMP`); classes B, C and
+  D leave WRAP. [read]
+- **Billboard class C phase** [read]. The per-plant phase starts at
+  `(rand%20)*0.1` and gains `2*dt` each frame. The mask offset uses half of it,
+  so `p = t + phase0/2`. The layer -1 x shift is `int(width)*0.005`
+  (truncated), with no time dependence.
+- **Water surface rows on screen, scene 1** [read + computed]. The nine mesh
+  rows (local z = -24 … +24) land at about -7, 32, 65, 91, 110, 122, 127, 125
+  and 116 px from the top. The fog factor per row is
+  `clamp((500 - 18*z_local) / (0.2*depth + 200), 0, 1)`, with depth =
+  bbox.max.z - bbox.min.z. That is 1.0 at the top row and 0.074 at the
+  horizon row in scene 1.
+- **Bubble start-up artefact** [read]. At init, each bubble's `rise` is
+  `bbox.min.y + (rand%10)*H/10` instead of `(rand%10)*H/10`. That puts the
+  initial particles below the floor before the 10 s pre-simulation, which
+  hides the effect. The respawn test uses `bbox.min.y + rise > bbox.max.y`.
+- **Light-mote fade-out** [inferred]. For `u >= 0.9` the alpha is computed as
+  `(0.9 - u)*10*255` and truncated to a byte. The result is negative, so the
+  low byte wraps: there is a one-frame pop, then a descending ramp. A rebuild
+  can use a plain linear fade-out.
+- **Registry failure** [read]. If `SceneIndex` cannot be written, the index
+  function returns 0. The code then uses the out-of-range defaults (colour 0,
+  level 0.3), and loading `SCENES/0` fails.
