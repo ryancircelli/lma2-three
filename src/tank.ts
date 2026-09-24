@@ -28,8 +28,8 @@
 import * as THREE from "three";
 import { type FishEntry, type FishInstance, type FishModel, loadFish } from "./fish.ts";
 import { loadXDoc } from "./xloader.ts";
-import { applyCreatureCaustics } from "./caustics.ts"; // caustics hook
-import { attachCrabShadow } from "./shadow.ts"; // caustics hook (crab shadow)
+import { applyCreatureCaustics, ownCausticClock } from "./caustics.ts"; // caustics hook
+import { attachCrabShadow, bobCrabShadow } from "./shadow.ts"; // caustics hook (crab shadow)
 import { applyFixedFunction, FISH, FLOOR, HORSE, setFixedFunctionScene } from "./fixedfunction.ts"; // [render2]
 
 /** Small seedable PRNG (mulberry32), so a given ?t= always shows the same frame. */
@@ -211,6 +211,7 @@ interface Fish {
   swayPhase: number; // +0x68
   nav: Nav | null;
   sway: { w: number[]; left: number; right: number } | null;
+  caustic: ((tt: number) => void) | null; // [render2] this fish's own caustic frame (caustics.ts ownCausticClock)
 }
 
 /**
@@ -505,6 +506,9 @@ export class Tank {
       swayPhase: 0, // +0x68 is never initialised for the sea horse [unknown]; 0
       nav: null,
       sway: null,
+      // [render2] a fish's caustic frame runs on its own clock; the sea horse's
+      // pass reads a field of its own class [unknown] and stays on the scene's
+      caustic: inst && !horse ? ownCausticClock(inst.object) : null,
     };
     if (horse && inst) {
       inst.object.traverse((o) => {
@@ -767,6 +771,7 @@ export class Tank {
     c.phase += d * c.speed * 0.5 * (c.plus ? 2.5 : -2.5);
     if (c.phase < 0) c.phase += 110000;
     c.inst.setPhase(c.phase / CRAB_FRAMES);
+    bobCrabShadow(c.inst.object, c.phase); // [render2] shadow y = 3 sin(phase) - 10
     const step = d * c.speed * 0.5;
     if (step === 0) return; // standing still: the pose update is skipped
     const here = c.walk.sample();
@@ -1214,6 +1219,7 @@ export class Tank {
     }
     // painter's order, far to near (comparator 0x40dc60): also the avoidance order
     this.fish.sort((a, b) => b.mpos.z - a.mpos.z);
+    for (const f of this.fish) f.caustic?.(f.tt); // [render2] per-fish caustic frame (t + timeOffset)
   }
 
   /** Advance deterministically to time t (for ?t= snapshots). */
@@ -1257,7 +1263,7 @@ export class Tank {
    */
   ambientLeft(caustic: boolean, causticOnFish: boolean): number | null {
     let nearest: Fish | null = null;
-    for (const f of this.fish) if (f.holder && f.front && (!nearest || f.pos.z < nearest.pos.z)) nearest = f;
+    for (const f of this.fish) if (f.holder && f.front && (!nearest || f.mpos.z < nearest.mpos.z)) nearest = f; // the draw order's key
     let level: number | null = nearest ? (nearest.kind === "fish" && !causticOnFish ? 0xaa : 0x80) : null;
     if (caustic && this.stars.some((s) => s.glass)) level = 0x80;
     return level === null ? null : level / 255;

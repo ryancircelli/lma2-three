@@ -87,6 +87,7 @@ uniform float ffpFogOn;
 varying vec3 vFfpDiffuse;
 varying vec3 vFfpSpecular;
 varying float vFfpFog;
+varying float vFfpNL;
 `;
 
 // objectNormal: MeshBasicMaterial computes it only for env maps or skinning.
@@ -113,6 +114,7 @@ const VERTEX_LIGHT = /* glsl */ `
   }
   vFfpDiffuse = clamp(d, 0.0, 1.0);
   vFfpSpecular = clamp(s, 0.0, 1.0);
+  vFfpNL = ffpLevel * max(nl, 0.0); // the light's own term (for the caustic pass, caustics.ts)
   vFfpFog = ffpFogOn > 0.5 ? clamp((ffpFogRange.y - (-mvPosition.z)) / (ffpFogRange.y - ffpFogRange.x), 0.0, 1.0) : 1.0;
 }
 `;
@@ -122,6 +124,7 @@ uniform vec3 ffpFogColor;
 varying vec3 vFfpDiffuse;
 varying vec3 vFfpSpecular;
 varying float vFfpFog;
+varying float vFfpNL;
 `;
 
 // Texture bytes x diffuse + specular, saturate, fog: all on the 8-bit values.

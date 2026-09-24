@@ -5,9 +5,10 @@
 //     every reference frame with the crab. Fish cast NO shadow - fish passing
 //     low over the sand in the references leave the sand unchanged - and the
 //     sea star carries its own Sea_Star_Shadow mesh.
-//   - Decompiled: a 200x200 quad in crab space at local y = 3*sin(phase) - 10,
-//     colour = texture, alpha = texture*diffuse, SRCALPHA/INVSRCALPHA, Z off,
-//     drawn before the crab's body.
+//   - Decompiled: a 200x200 quad in crab space at local y = 3*sin(phase) - 10
+//     (phase = the walk phase), colour = texture, alpha = texture*diffuse
+//     (diffuse = its white vertex colour), SRCALPHA/INVSRCALPHA, Z off, drawn
+//     before the crab's body.
 
 // @ts-types="npm:@types/three@0.186.0"
 import * as THREE from "three";
@@ -19,10 +20,9 @@ const Y = -10;
 /**
  * Put the shadow under a crab model. `model` is the object loadFish() returns
  * (handedness root -> inner model-space group); the quad goes into model space,
- * so instances cloned from it carry their own copy.
- *
- * Not reproduced: the +-3 unit bob with the walk phase (~2 px on screen).
- * CALIBRATE: alpha = texture * diffuse; diffuse taken as 1.
+ * so instances cloned from it carry their own copy. Its vertices are
+ * D3DLVERTEX with colour white (FVF 0x1e2), so alpha = texture alpha.
+ * The +-3 unit bob with the walk phase: bobCrabShadow(), every frame.
  */
 export function attachCrabShadow(model: THREE.Object3D, assetsUrl: string): void {
   const inner = model.children[0] ?? model;
@@ -45,4 +45,20 @@ export function attachCrabShadow(model: THREE.Object3D, assetsUrl: string): void
   quad.position.y = Y;
   quad.renderOrder = -1;
   inner.add(quad);
+}
+
+const quads = new WeakMap<THREE.Object3D, THREE.Object3D | null>();
+
+/**
+ * The shadow's height follows the crab's walk phase (the pose counter, 0x409d00
+ * / draw 0x40ab70): local y = 3 sin(phase) - 10, a +-3 unit bob (~2 px).
+ * `crab` is the crab's instance object (it holds its own quad copy).
+ */
+export function bobCrabShadow(crab: THREE.Object3D, phase: number): void {
+  let q = quads.get(crab);
+  if (q === undefined) {
+    q = crab.getObjectByName("crab-shadow") ?? null;
+    quads.set(crab, q);
+  }
+  if (q) q.position.y = 3 * Math.sin(phase) + Y;
 }
