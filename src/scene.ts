@@ -369,7 +369,10 @@ export async function loadScene(id: string, assetsUrl: string, opts: SceneOption
       const base = new Float32Array([x0, y0, z, x0, y1, z, x1, y1, z, x1, y0, z]);
       const mk = (tex: string, sub: number) => {
         const map = textures.get(tex)!.clone();
-        map.wrapS = map.wrapT = THREE.ClampToEdgeWrapping; // sprites: never wrap
+        // Class A sets ADDRESSU/V = CLAMP; B, C and D leave the default WRAP
+        // (docs/original-logic.md 8), so bilinear filtering at their quad
+        // edges blends in the opposite edge of the texture.
+        map.wrapS = map.wrapT = def.cls === "A" ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
         map.needsUpdate = true;
         const mat = new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false, side: THREE.DoubleSide });
         const obj = new THREE.Mesh(billboardQuad(base), mat);
