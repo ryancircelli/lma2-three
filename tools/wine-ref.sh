@@ -9,6 +9,13 @@
 #   tools/wine-ref.sh setup                     # once: private Wine prefix + copy of the install
 #   tools/wine-ref.sh capture OUT.png [scene] [caustics 0|1] [fish 0|1] [delay-seconds]
 #
+# scene 0 = the install's rotation mode: each launch advances the prefix's
+# HKLM\Software\Triodesign\Living Marine Aquarium 2.0\SceneIndex to (old+1)%3
+# and shows scene new+1 (grep SceneIndex "$PREFIX/system.reg" to see it). There
+# is no timed switch within a run: a long "sequence ... 0 ..." stays on one scene.
+# Under load the splash screen can outlast the default 9 s delay - check the
+# frame, or pass a longer delay (20).
+#
 # Caveat: Wine renders Direct3D through OpenGL (wined3d) on Mesa's software
 # rasteriser. Layout, layering, texturing and framing are trustworthy; exact
 # colour and filtering are Wine's, not the 2005 driver's.
