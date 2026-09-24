@@ -59,22 +59,22 @@ interface Box {
 type V3 = { x: number; y: number; z: number };
 
 /**
- * 0x417ae0: linear interpolation along a polyline sorted by x, clamped to its
- * ends. (The original returns 0 when x lands exactly on an inner vertex: a
- * measure-zero quirk, not reproduced.)
+ * 0x417ae0, exactly: the points in their STORED order (never sorted);
+ * x < p[0].x gives p[0].y, x > p[last].x gives p[last].y, otherwise the
+ * first segment with p[i].x < x < p[i+1].x is interpolated, and if none
+ * matches (x exactly on a vertex, or points out of order) the result is 0.
  */
 function polyline(pts: [number, number][]): (x: number) => number {
-  pts.sort((a, b) => a[0] - b[0]);
   return (x) => {
     if (!pts.length) return -Infinity;
-    if (x <= pts[0][0]) return pts[0][1];
-    for (let i = 1; i < pts.length; i++) {
-      if (x <= pts[i][0]) {
-        const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
-        return y0 + (y1 - y0) * (x - x0) / (x1 - x0 || 1);
-      }
+    if (x < pts[0][0]) return pts[0][1];
+    const n = pts.length;
+    if (!(x <= pts[n - 1][0])) return pts[n - 1][1];
+    for (let i = 0; i < n - 1; i++) {
+      const [x0, y0] = pts[i], [x1, y1] = pts[i + 1];
+      if (x0 < x && x < x1) return (y1 - y0) * ((x - x0) / (x1 - x0)) + y0;
     }
-    return pts[pts.length - 1][1];
+    return 0;
   };
 }
 
@@ -110,7 +110,11 @@ interface SceneData {
   floor: (x: number) => number;
   /** The crab's and sea star's line: the same points at y = bbox.min.y + 0.15 H + p.y - 80, sorted by x. */
   walkPath: [number, number][];
-  /** Top edge of the foreground reef painting (mesh `height`). */
+  /**
+   * The line fish must clear to cross the foreground plane (0x415150, 0x417d10,
+   * 0x417e40, 0x4189b0): mesh `height` read RAW, i.e. 0 for every x in all
+   * three scenes (see setScene) - not the drawn reef edge.
+   */
   height: (x: number) => number;
 }
 
@@ -356,17 +360,26 @@ export class Tank {
     const doc = await loadXDoc(base + "mesh.X");
     const bbox: Box = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, minZ: Infinity, maxZ: -Infinity };
     const v = new THREE.Vector3();
+    // The reef line (`height`) is read like Crab_Path: 0x412450 fetches the
+    // mesh with FindObject (0x41bac0 -> 0x42ea80) and copies the RAW vertex
+    // array that CD3DFileMesh::GetGeometry (0x42f7a0: +0x60 vertices, +0x5c
+    // count) returns, x and y of each 32-byte D3DVERTEX, in file order. The
+    // .X frame matrix is applied only at draw time (CD3DFileFrame render
+    // 0x42f8e0 multiplies +0x5c into WORLD), never baked. The height mesh is
+    // modelled flat in its XZ plane (every raw y is 0; the frame rotates it
+    // upright), so in the original height(x) = 0 everywhere [read].
     let heightPts: [number, number][] = [];
     for (const m of doc.meshes) {
-      const pts: [number, number][] = [];
       for (let i = 0; i < m.positions.length; i += 3) {
         v.fromArray(m.positions, i).applyMatrix4(m.world);
         bbox.minX = Math.min(bbox.minX, v.x), bbox.maxX = Math.max(bbox.maxX, v.x);
         bbox.minY = Math.min(bbox.minY, v.y), bbox.maxY = Math.max(bbox.maxY, v.y);
         bbox.minZ = Math.min(bbox.minZ, v.z), bbox.maxZ = Math.max(bbox.maxZ, v.z);
-        pts.push([v.x, v.y]);
       }
-      if (m.name === "height") heightPts = pts;
+      if (m.name === "height") {
+        heightPts = [];
+        for (let i = 0; i < m.positions.length; i += 3) heightPts.push([m.positions[i], m.positions[i + 1]]);
+      }
     }
     const H = bbox.maxY - bbox.minY;
     // Crab_Path is NOT baked to world: its RAW vertices are used, frame ignored.
@@ -377,13 +390,15 @@ export class Tank {
       if (crab) for (let i = 0; i < crab.positions.length; i += 3) raw.push([crab.positions[i], crab.positions[i + 1]]);
     } catch { /* no path.X */ }
     if (raw.length < 4) raw = [[bbox.minX, 0], [bbox.minX / 3, 0], [bbox.maxX / 3, 0], [bbox.maxX, 0]];
-    raw.sort((p, q) => p[0] - q[0]);
+    // the fish floor keeps the file order (0x412450 -> 0x417ae0); the crab's
+    // and sea star's walk list is sorted by x in their own loaders
+    const sorted = [...raw].sort((p, q) => p[0] - q[0]);
     const Ay = bbox.minY + 0.15 * H;
     this.data = {
       bbox,
       bounds: { ...bbox, minY: bbox.minY * 0.8, maxZ: bbox.maxZ * 0.8 },
       floor: polyline(raw.map(([x, y]) => [x, y + Ay - 30])),
-      walkPath: raw.map(([x, y]) => [x, y + Ay - 80]),
+      walkPath: sorted.map(([x, y]) => [x, y + Ay - 80]),
       height: polyline(heightPts.length ? heightPts : [[0, bbox.minY]]),
     };
     this.sceneId = id;
