@@ -75,7 +75,24 @@ export function setFixedFunctionScene(o: { bbox: { minY: number; maxY: number; m
   shared.ffpEye.value.set(0, (o.bbox.minY + o.bbox.maxY) / 2, -(o.bbox.minZ - 2000));
   const c = o.fogColor;
   shared.ffpFogColor.value.set(((c >> 16) & 255) / 255, ((c >> 8) & 255) / 255, (c & 255) / 255);
-  shared.ffpFogRange.value.set(o.fogNear, o.fogFar);
+  lastFogRange = [o.fogNear, o.fogFar];
+  applyFogRange();
+}
+
+let fogEnabled = true;
+let lastFogRange: [number, number] = [1e9, 2e9];
+function applyFogRange(): void {
+  if (fogEnabled) shared.ffpFogRange.value.set(...lastFogRange);
+  else shared.ffpFogRange.value.set(1e9, 2e9); // beyond any depth: no fog
+}
+
+/**
+ * Creature depth fog on/off. The original fogs creatures only when the
+ * foreground is drawn, so the bare tank (?bare=1, like LMA2_BARE) has none.
+ */
+export function setFixedFunctionFog(on: boolean): void {
+  fogEnabled = on;
+  applyFogRange();
 }
 
 const VERTEX_PARS = /* glsl */ `
@@ -151,7 +168,13 @@ export function fixedFunctionMaterial(src: THREE.Material, ff: FixedFunction, fa
     opacity: 1,
     alphaTest: 0,
     depthWrite: true, // Z on, writes included
-    side: src.side,
+    // Back faces culled, as the original never changes D3D's default cull mode
+    // (0x407724 only re-sets the default). The .X models are double-skinned, so
+    // drawing both sides blends the inside over the outside and washes colours
+    // out (yellow tang blue 30 vs 44 in fidelity-review.md round 2). The Z
+    // mirror is a negative scale on the root, for which three.js flips the
+    // winding rule, so FrontSide culls what D3D culled.
+    side: THREE.FrontSide,
     fog: false, // D3D's linear vertex fog, below
   });
   const dir = new THREE.Vector3(-ff.light[0], -ff.light[1], ff.light[2]).normalize(); // toward the light, Z mirrored

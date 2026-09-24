@@ -25,6 +25,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { type FishEntry, type FishModel, loadFish } from "./fish.ts";
 import { ambience } from "./audio.ts";
+import { setFixedFunctionFog } from "./fixedfunction.ts";
 import { fishPicker, stockParam } from "./fishpicker.ts";
 import { loadScene, nextRotationScene, type SceneModel } from "./scene.ts";
 import { Tank } from "./tank.ts";
@@ -282,6 +283,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   // ?bare=1: no painting and no water surface - creatures on the flat clear
   // colour, like tools/wine-ref.sh LMA2_BARE=1 (add rays=0&bubbles=0&caustics=0).
   const bare = params.get("bare") === "1";
+  if (bare) setFixedFunctionFog(false); // the original fogs creatures only with the foreground on
   const paint = (pass: 0 | 1) => {
     if (current) {
       current.back.visible = pass === 0 && !bare;
