@@ -7,7 +7,8 @@
 //   ?phase=0..1        fish viewer: freeze the pose
 //   ?t=<seconds>       freeze animation time (deterministic frames for diffs)
 //   ?size=WxH          fixed canvas size in CSS px, e.g. 1024x768 (the original's mode)
-//   ?clean=1           hide all UI (reference comparisons)
+//   ?clean=1           hide all UI and play no sound (reference comparisons)
+//   ?sound=0 / ?volume=<dB>   ambient loop off / its level (see audio.ts)
 //
 // window.lma2 exposes load state for automated checks (agent-browser eval).
 
@@ -16,7 +17,8 @@ import * as THREE from "three";
 // @ts-types="npm:@types/three@0.186.0/examples/jsm/controls/OrbitControls.d.ts"
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { type FishEntry, type FishModel, loadFish } from "./fish.ts";
-import { loadScene, type SceneModel } from "./scene.ts";
+import { ambience } from "./audio.ts";
+import { loadScene, nextRotationScene, type SceneModel } from "./scene.ts";
 import { Tank } from "./tank.ts";
 import { WaterSurface } from "./surface.ts"; // water surface
 
@@ -85,32 +87,40 @@ function done(subject: string, detail: string): void {
 // --- tank view ------------------------------------------------------------------
 
 async function tankView(manifest: Manifest): Promise<(t: number) => void> {
-  // Open water behind the painting is one flat colour: measured rgb(0,138,255)
-  // at every open-water sample below the surface band of a reference frame.
-  scene.background = new THREE.Color().setRGB(0, 138 / 255, 1, THREE.SRGBColorSpace);
+  // Open water behind the painting is one flat colour per scene (scene.ts
+  // CLEAR_COLOR); set in show().
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 20000);
   camera.position.set(0, 0, 10000); // looking down -Z = the original's +Z after the mirror
   let current: SceneModel | null = null;
 
-  // Calibration against reference frames of the original (tools/register.ts).
-  // The painted planes overscan the original's view: at 1024x768 its content
-  // is ~1.8% larger than a tight fit of the planes. First measured as a
-  // displacement running linearly from +7.4px (left) to -6.8px (right) and +2
-  // to -6.4px (top to bottom) - the same slope in every layer, so a scale, not
-  // perspective. A second pass left +0.7px/-0.6px top/bottom with x already
-  // aligned: the vertical scale is ~0.28% larger than the horizontal.
-  // ?zoomx= / ?zoomy= / ?dx= / ?dy= (pixels) override, for recalibration.
-  const ZOOM_X = Number(params.get("zoomx") ?? 1.018);
-  const ZOOM_Y = Number(params.get("zoomy") ?? 1.0209);
-  const NUDGE_X = Number(params.get("dx") ?? 0);
-  const NUDGE_Y = Number(params.get("dy") ?? 0.8); // + moves content down
+  // Camera, as the original sets it up (recovered from its code, then verified
+  // per scene against reference frames with tools/register.ts): an orthographic
+  // box over the X/Y extent of EVERY vertex in the scene's mesh.X (W x H - the
+  // Relief, billboards and `height` data included, not just the painted
+  // planes), shrunk to 98%: OrthoLH(W*0.98, H*0.98), looking from x = 0 (NOT
+  // the box's centre) and y = the box's centre. The zoom therefore differs per
+  // scene in x, because the Relief overhangs the painted planes by a different
+  // amount in each (vs a tight fit of the planes: 1.0180 / 1.0166 / 1.0200).
+  // History: scene 1 was first fitted empirically (1.018 x 1.0209 over the
+  // planes) - this model reproduces that to 0.05% and also fits scenes 2-3,
+  // where scene 1's constants left a 1.2-1.5px linear x error.
+  // NUDGE: the residual whole-picture offset after that, measured with
+  // register.ts on all three scenes (the same in each): the original's content
+  // sits 0.5px right and 0.5px lower than a GL render of the same matrices.
+  // Probably the D3D pixel-centre convention (inferred, not proven).
+  // ?zoomx= / ?zoomy= (divisors of the bbox, default 1/0.98) and ?dx= / ?dy=
+  // (pixels) override, for recalibration.
+  const ZOOM_X = Number(params.get("zoomx") ?? 1 / 0.98);
+  const ZOOM_Y = Number(params.get("zoomy") ?? 1 / 0.98);
+  const NUDGE_X = Number(params.get("dx") ?? 0.5); // + moves content right
+  const NUDGE_Y = Number(params.get("dy") ?? 0.5); // + moves content down
 
   function fit(): void {
     if (!current) return;
     const w = canvas.clientWidth, h = canvas.clientHeight;
     renderer.setSize(w, h, false);
-    const f = current.frame;
-    // The original's visible world extent (calibrated, not quite square pixels).
+    const f = current.bounds;
+    // The original's visible world extent (not quite square pixels at 1024x768).
     const vw = (f.max.x - f.min.x) / ZOOM_X, vh = (f.max.y - f.min.y) / ZOOM_Y;
     let hw: number, hh: number;
     if (Math.abs(w / h - 4 / 3) < 0.01) {
@@ -123,7 +133,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
       hw = w / pxPerUnit / 2;
       hh = h / pxPerUnit / 2;
     }
-    const cx = (f.min.x + f.max.x) / 2 - NUDGE_X * (2 * hw / w); // camera moves opposite to content
+    const cx = 0 - NUDGE_X * (2 * hw / w); // eye x = 0; the camera moves opposite to content
     const cy = (f.min.y + f.max.y) / 2 + NUDGE_Y * (2 * hh / h);
     Object.assign(camera, { left: cx - hw, right: cx + hw, top: cy + hh, bottom: cy - hh });
     camera.updateProjectionMatrix();
@@ -149,6 +159,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   const label = document.createElement("label");
   label.append("Scene ", select);
   panel.append(label);
+  if (params.get("clean") !== "1" && frozenT === null) ambience(ASSETS + "common/Sound_undwater.ogg", params, panel);
 
   async function show(id: string): Promise<void> {
     status.ready = false;
@@ -169,16 +180,24 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     }
     await surface.setScene(id, ASSETS); // water surface
     current = model;
+    scene.background = model.clearColor;
     scene.add(model.object);
     nearScene.add(model.near);
     fit();
-    params.set("scene", id);
-    history.replaceState(null, "", `?${params}`);
     done(`scene-${id}`, `Scene ${id} · ${tank.count} creatures`);
   }
-  select.addEventListener("change", () => show(select.value));
+  select.addEventListener("change", () => {
+    // A scene picked by hand is pinned in the URL; a rotated one is not, so a
+    // reload rotates on like a relaunch of the original.
+    params.set("scene", select.value);
+    history.replaceState(null, "", `?${params}`);
+    show(select.value);
+  });
 
-  const first = manifest.scenes.find((s) => s.id === params.get("scene"))?.id ?? manifest.scenes[0].id;
+  // ?scene=N pins a scene (calibration relies on it); otherwise rotate once
+  // per page load, as the original does once per launch (scene.ts).
+  const first = manifest.scenes.find((s) => s.id === params.get("scene"))?.id ??
+    nextRotationScene(manifest.scenes.map((s) => s.id));
   select.value = first;
   await show(first);
 

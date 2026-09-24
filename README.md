@@ -90,6 +90,13 @@ Two meshes have no triangles and are data, not geometry: `Crab_Path` (25-35 poin
 - **Rendering** - checked in headless Chromium via [agent-browser](https://github.com/vercel-labs/agent-browser), one species per
   animation kind: page state read through `window.lma2`, then screenshots.
 
+## Sound
+
+The original's only sound, `Sound_undwater.ogg`, loops gaplessly (Web Audio) in the tank view. Browsers allow audio only after
+a gesture, so it starts on the first click or key press. **M** or the panel button toggles mute (remembered per browser).
+`?sound=0` disables it; `?volume=<dB>` sets the level, default **-12 dB** (the bubbling is loud at the original level; the
+install was patched down by the same amount). `?clean=1` and `?t=` captures are silent.
+
 ## Deploy (private, password-protected)
 
 Every push to `main` runs `.github/workflows/deploy.yml`, which type-checks, tests, builds and stages `_site/`, then deploys it with

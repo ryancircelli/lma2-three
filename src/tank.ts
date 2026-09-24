@@ -14,6 +14,8 @@
 // @ts-types="npm:@types/three@0.186.0"
 import * as THREE from "three";
 import { type FishEntry, type FishInstance, type FishModel, loadFish } from "./fish.ts";
+import { applyCreatureCaustics } from "./caustics.ts"; // caustics hook
+import { attachCrabShadow } from "./shadow.ts"; // caustics hook (crab shadow)
 
 // --- CALIBRATE ---------------------------------------------------------------
 /** Camera distance in front of the painting's plane (three.js z=0). Sets how
@@ -118,6 +120,8 @@ export class Tank {
     let m = this.models.get(entry.slug);
     if (!m) {
       m = await loadFish(entry, assetsUrl);
+      applyCreatureCaustics(m.object, m.kind, assetsUrl); // caustics hook: caustic / causticonfish pass
+      if (m.kind === "cycle") attachCrabShadow(m.object, assetsUrl); // caustics hook: crab shadow (after caustics)
       this.models.set(entry.slug, m);
     }
     return m;

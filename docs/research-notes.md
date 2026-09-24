@@ -151,27 +151,39 @@ ImageMagick one-liners used constantly:
   `.X` files resolve to the `.png`).
 - One audio file, an 8 s Ogg loop.
 
-### The painted reef (src/scene.ts) - calibrated for scene 1
+### The painted reef (src/scene.ts) - all three scenes
 
 - A scene is a hand-painted reef on flat tiled planes: `Background`
   (`bg_slice*`, far) and `Foreground` (`fg_slice*`, near), plus billboard quads.
   Viewed through an **orthographic** camera, **unlit**.
-- Calibrated camera (src/main.ts): the original's view is tighter than the
-  planes: `ZOOM_X = 1.018`, `ZOOM_Y = 1.0209`, `NUDGE_Y = 0.8 px`. After this,
-  every region of scene 1 aligns within 0.5 px (tools/register.ts shows 0%
-  improvement from any shift). **Unverified for scenes 2-3.**
-- Open water behind everything is a flat clear colour, exactly `rgb(0,138,255)`.
+- Camera (src/main.ts, from the original's code, verified per scene with
+  register.ts): ortho box over the X/Y extent of **every vertex** in mesh.X
+  (Relief/billboards/height included) at 98% (`OrthoLH(W*0.98, H*0.98)`), eye
+  x = 0, y = box centre; then content 0.5 px right and 0.5 px down (pixel-centre
+  convention, inferred). All regions of all three scenes align within ~0.1 px.
+  (The old scene-1 fit 1.018 x 1.0209 was this to 0.05%; it left scenes 2-3
+  1.2-1.5 px off at the edges.)
+- Clear colour per scene, read from the .scr: 1 `#008aff`, 2 `#00cbfd`,
+  3 `#036ed6` (exact match to references).
 - Tiles are clamped (repeat wrapping produced seam lines).
-- **Billboards** (plants, anemones) ship with NO UVs and lie in local XZ; UVs are
-  derived from the world-space extent. Each has two textures, which are **two
-  layers of one plant drawn together at full opacity**, not animation frames.
-  They are **static** - measured over a 34 s sequence: no motion, no cross-fade.
-  Texture assignment per mesh is a code-side table (`BILLBOARDS`) - verified for
-  scene 1, **guessed for scenes 2-3** (scene 2's `anemone -> SpondeGreen` is by
-  elimination; scene 3 ships `Anemone-*` and `Blue anemones-*` textures with no
-  quad using them).
-- Scene 1's seaweed is drawn 58 px right / 14 px up of where its frame puts it
-  (`PLACEMENT_FIX`, measured by matchsprite). Reason unknown; not perspective.
+- Draw order is far-to-near by frame z; nothing writes depth. So billboards with
+  z > 0 (scene 1 soft coral, scene 2 sea whips) are hidden behind the Foreground.
+  SceneModel exposes the original's two passes: `back` (Background) and `front`
+  (billboards, Foreground, Relief, near billboards). Creatures behind the
+  foreground go between them, creatures in front go after `front` - over the
+  near billboards too (`near` is now always empty; original-logic.md 2.2).
+- **Billboards**: the table (textures, class, bbox edit) is hard-coded in one
+  setup function per scene (.scr 0x41dc90 / 0x41d3a0 / 0x41e5c0) - see
+  `BILLBOARDS` in scene.ts. Each is a quad over its frame's world bbox, with a
+  constant edit (scene 1 seaweed x+100 = the old "58px" mystery; scene 2 sea
+  whip top +100; scene 3 yellow grass x-150, blue anemones x+200). Two layers
+  per plant, both at full opacity. **They MOVE** (`plantsmoving`): four classes
+  sway their layers against each other (period pi s) and class B tops rotate
+  about the world origin (~19 px, 63 s cycle). The earlier "static" finding was
+  wrong. Verified on a 43 s Wine sequence of scene 3: one clock offset fits
+  every frame (31-32 dB).
+- Scene rotation (`index` 0): once per launch, via registry `SceneIndex`
+  (first run shows scene 2); never on a timer (15 min run: no switch).
 - `Relief` (the only real 3D mesh) is not drawn yet - it carries the caustics
   (texture name `caustics_00.dds`, which does not exist; frames `_01`..`_29` do).
 - `height` (7-8 points) and `Crab_Path` (25-35 points, in path.X) are data, not
