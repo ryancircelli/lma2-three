@@ -30,6 +30,11 @@
 //     toward the horizon.
 //   - Back faces culled: the rows that fold back up (0-2) are not drawn (with
 //     them the band near y=116-126 would be 10-30% brighter than measured).
+//   - The horizon edge: the fold row lands at window y = 127.19 (all three
+//     scenes, 0.5 px nudge included), so pixel row 127 (centre 127.5) is
+//     outside the band and stays dark, as in the reference. With MSAA it got
+//     ~19% coverage and lit up (+3 R+G; the review's "one row too many").
+//     The renderer has no MSAA now (main.ts), so no geometry change is needed.
 
 // @ts-types="npm:@types/three@0.186.0"
 import * as THREE from "three";
