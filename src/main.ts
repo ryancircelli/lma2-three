@@ -16,7 +16,7 @@ import * as THREE from "three";
 // @ts-types="npm:@types/three@0.186.0/examples/jsm/controls/OrbitControls.d.ts"
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { type FishEntry, type FishModel, loadFish } from "./fish.ts";
-import { loadScene, type SceneModel } from "./scene.ts";
+import { loadScene, nextRotationScene, type SceneModel } from "./scene.ts";
 import { Tank } from "./tank.ts";
 
 interface Manifest {
@@ -172,13 +172,20 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     scene.add(model.object);
     nearScene.add(model.near);
     fit();
-    params.set("scene", id);
-    history.replaceState(null, "", `?${params}`);
     done(`scene-${id}`, `Scene ${id} · ${tank.count} creatures`);
   }
-  select.addEventListener("change", () => show(select.value));
+  select.addEventListener("change", () => {
+    // A scene picked by hand is pinned in the URL; a rotated one is not, so a
+    // reload rotates on like a relaunch of the original.
+    params.set("scene", select.value);
+    history.replaceState(null, "", `?${params}`);
+    show(select.value);
+  });
 
-  const first = manifest.scenes.find((s) => s.id === params.get("scene"))?.id ?? manifest.scenes[0].id;
+  // ?scene=N pins a scene (calibration relies on it); otherwise rotate once
+  // per page load, as the original does once per launch (scene.ts).
+  const first = manifest.scenes.find((s) => s.id === params.get("scene"))?.id ??
+    nextRotationScene(manifest.scenes.map((s) => s.id));
   select.value = first;
   await show(first);
 

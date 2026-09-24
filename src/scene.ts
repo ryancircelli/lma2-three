@@ -93,6 +93,32 @@ const MASK_PHASE = 0.475;
  */
 const CLEAR_COLOR: Record<string, number> = { "1": 0x008aff, "2": 0x00cbfd, "3": 0x036ed6 };
 
+/**
+ * Scene rotation (settings `index` = 0, the install's value), as the original
+ * does it: once per LAUNCH, never on a timer. Its scene picker (.scr 0x411a50)
+ * reads HKLM\Software\Triodesign\Living Marine Aquarium 2.0\SceneIndex
+ * (default 0), writes (old + 1) % 3 back and shows scene new + 1 - so the
+ * first run shows scene 2, then 3, then 1. Measured under Wine: three
+ * successive launches showed scenes 3, 1, 2 with SceneIndex going 1 -> 2 ->
+ * 0 -> 1, and one launch left running for 15 minutes (75 frames, 10-15 s
+ * apart) stayed on its scene the whole time - no switch, so no transition.
+ * Fish are therefore never carried across a switch either. The browser
+ * equivalent of the registry value is a localStorage counter, advanced on
+ * every page load that does not pin a scene with ?scene=.
+ */
+export function nextRotationScene(ids: string[]): string {
+  const KEY = "lma2.sceneIndex";
+  let old = 0;
+  try {
+    old = Number(localStorage.getItem(KEY) ?? 0) | 0;
+  } catch { /* storage blocked: behave like a fresh install */ }
+  const next = (old + 1) % ids.length;
+  try {
+    localStorage.setItem(KEY, String(next));
+  } catch { /* ignore */ }
+  return ids[next];
+}
+
 /** Billboards nearer than this (D3D z) draw in front of the fish. Scene 1's
  * anemones and seaweed sit at ~-1960; its soft coral at +304 is behind. */
 const NEAR_Z = -1000;
