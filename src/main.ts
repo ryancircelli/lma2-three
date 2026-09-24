@@ -9,6 +9,10 @@
 //   ?size=WxH          fixed canvas size in CSS px, e.g. 1024x768 (the original's mode)
 //   ?clean=1           hide all UI and play no sound (reference comparisons)
 //   ?sound=0 / ?volume=<dB>   ambient loop off / its level (see audio.ts)
+//   ?speed=0.5..4      playback speed (also the Speed selector)
+//
+// Keys: F or double-click toggles fullscreen (UI and cursor hide until the
+// mouse moves); M toggles sound.
 //
 // window.lma2 exposes load state for automated checks (agent-browser eval).
 
@@ -35,6 +39,8 @@ interface Status {
   subject: string | null;
   detail: string | null;
   error: string | null;
+  /** Current animation time in seconds (scaled by the Speed selector). */
+  time: number;
 }
 
 declare global {
@@ -49,7 +55,7 @@ const view = params.get("view") === "fish" ? "fish" : "tank";
 const frozenT = params.has("t") ? Number(params.get("t")) : null;
 const frozenPhase = params.has("phase") ? Number(params.get("phase")) : null;
 
-const status: Status = { ready: false, view, subject: null, detail: null, error: null };
+const status: Status = { ready: false, view, subject: null, detail: null, error: null, time: 0 };
 window.lma2 = status;
 
 if (params.get("clean") === "1") document.body.classList.add("clean");
@@ -339,14 +345,79 @@ async function fishView(manifest: Manifest): Promise<(t: number) => void> {
 
 // --- main -----------------------------------------------------------------------
 
+const SPEEDS = [0.5, 1, 1.5, 2, 3, 4];
+
 async function main(): Promise<void> {
   const res = await fetch(ASSETS + "manifest.json");
   if (!res.ok) throw new Error(`assets/manifest.json: HTTP ${res.status} - run \`deno task extract\` first`);
   const manifest = (await res.json()) as Manifest;
 
   const frame = view === "fish" ? await fishView(manifest) : await tankView(manifest);
+
+  // Playback speed: everything runs off this one scaled clock (fish, crab, sea
+  // star, plants, caustics, bubbles, rays), so slow motion stays consistent.
+  let timeScale = SPEEDS.includes(Number(params.get("speed"))) ? Number(params.get("speed")) : 1;
+  if (frozenT === null) {
+    const select = document.createElement("select");
+    for (const s of SPEEDS) select.add(new Option(`${s}\u00d7`, String(s)));
+    select.value = String(timeScale);
+    select.addEventListener("change", () => {
+      timeScale = Number(select.value);
+      if (timeScale === 1) params.delete("speed");
+      else params.set("speed", select.value);
+      history.replaceState(null, "", `?${params}`);
+    });
+    const label = document.createElement("label");
+    label.append("Speed ", select);
+    panel.append(label);
+  }
+
+  setupFullscreen();
+
   const clock = new THREE.Clock();
-  renderer.setAnimationLoop(() => frame(frozenT ?? clock.getElapsedTime()));
+  let simT = 0;
+  renderer.setAnimationLoop(() => {
+    simT += clock.getDelta() * timeScale;
+    status.time = frozenT ?? simT;
+    frame(status.time);
+  });
+}
+
+// Fullscreen: a panel button, F, or double-click on the scene. While
+// fullscreen, the panel, info and cursor hide after a moment without mouse
+// movement, so it looks like the screensaver; moving the mouse brings them back.
+function setupFullscreen(): void {
+  if (!document.fullscreenEnabled) return;
+  const toggle = () => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void document.documentElement.requestFullscreen().catch(() => {});
+  };
+  const button = document.createElement("button");
+  button.type = "button";
+  button.title = "Toggle fullscreen (F or double-click)";
+  const render = () => (button.textContent = document.fullscreenElement ? "Exit fullscreen" : "Fullscreen");
+  render();
+  button.addEventListener("click", toggle);
+  panel.append(button);
+  canvas.addEventListener("dblclick", toggle);
+  addEventListener("keydown", (e) => {
+    const target = e.target as HTMLElement | null;
+    if (target?.tagName === "SELECT" || target?.tagName === "INPUT") return;
+    if ((e.key === "f" || e.key === "F") && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) toggle();
+  });
+
+  let idle = 0;
+  const wake = () => {
+    document.body.classList.remove("idle");
+    clearTimeout(idle);
+    if (document.fullscreenElement) idle = setTimeout(() => document.body.classList.add("idle"), 2500);
+  };
+  addEventListener("mousemove", wake);
+  document.addEventListener("fullscreenchange", () => {
+    render();
+    button.blur(); // so Space/Enter don't re-trigger it
+    wake();
+  });
 }
 
 main().catch((e) => fail((e as Error).message));

@@ -17,6 +17,10 @@
     #info.error { color: #ffb4a8; }
     /* ?clean=1 - nothing but the canvas, for reference comparisons */
     body.clean #panel, body.clean #info { display: none; }
+    /* Fullscreen with no recent mouse movement (main.ts): screensaver look */
+    body.idle #panel, body.idle #info { opacity: 0; pointer-events: none; }
+    body.idle, body.idle #view { cursor: none; }
+    #panel, #info { transition: opacity 0.4s; }
   </style>
 </head>
 <body>
