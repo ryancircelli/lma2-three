@@ -30,6 +30,11 @@
 //     toward the horizon.
 //   - Back faces culled: the rows that fold back up (0-2) are not drawn (with
 //     them the band near y=116-126 would be 10-30% brighter than measured).
+//   - The horizon edge: the fold row lands at window y = 127.19 (all three
+//     scenes, 0.5 px nudge included), so pixel row 127 (centre 127.5) is
+//     outside the band and stays dark, as in the reference. With MSAA it got
+//     ~19% coverage and lit up (+3 R+G; the review's "one row too many").
+//     The renderer has no MSAA now (main.ts), so no geometry change is needed.
 
 // @ts-types="npm:@types/three@0.186.0"
 import * as THREE from "three";
@@ -40,32 +45,27 @@ import { loadXDoc, type XMesh } from "./xloader.ts";
 const SCALE = { x: 19, y: 15, z: 18 };
 const DROP_Y = 200; // below the scene bbox's top
 
-// --- CALIBRATE ---------------------------------------------------------------
 /**
- * The vertex diffuse (R, G, B) the surface is drawn with. The decompile leaves
- * the lighting at that moment [inferred]; it is in fact whatever state the
- * previous frame left behind (a render-state leak), so it depends on what else
- * is drawn. Measured in scene 1, frame-matched (the same caustics frame in the
- * reference and here, identified by tools/surfacemap.ts; ratios by
- * tools/surfaceratio.py) or as a sequence mean:
- *   caustics off, no creatures   1.00 at every row (ref/ours 1.003 over 40 frames;
- *                                per band 1.000-1.009; pixel RMS error 1.3 of 45)
- *   caustics on,  no creatures   0.50 at every row (ref/ours 1.008 over 40 frames)
- *   caustics off, creatures      R 0.65, G 0.61 (sequence mean, 74 frames)
- *   caustics on,  creatures      R 0.64, G 0.46 (sequence mean, 74 frames)
- * Flat across rows in every case: no dependence on the mesh normals. With
- * creatures the tint changes from frame to frame (dG/dR 0.54-0.72): these are
- * means. B cannot be measured in scene 1 (the clear colour's B is already
- * 255), so B = G is assumed. ?surfshade=<v> forces a grey level.
+ * The surface's vertex diffuse. Every normal of watersurface.X points DOWN
+ * (n.y -0.986..-0.998), so neither light reaches it: its diffuse is exactly
+ * the AMBIENT light state, and nothing sets that before the surface draws -
+ * it is whatever the previous frame's last ambient-setting draw left
+ * (docs/fidelity-review.md D4, frame order 0x40e330):
+ *   Foreground plane 0xFF; Relief caustics (caustic) 0x80 after; then the
+ *   nearest creature in front: fish 0xAA, 0x80 with causticonfish; sea horse
+ *   0x80; a sea star on the glass 0x80 (caustic). Tank.ambientLeft().
+ * The first frame sees the init state, 0x80. Grey: the measured G/B "tint"
+ * with creatures was scene 1's channel saturation.
+ * Measured before this was known (scene 1; tools/surfacemap.ts,
+ * tools/surfaceratio.py): 1.00 with no creatures and caustics off, 0.50 with
+ * caustics on (ref/ours 1.003 and 1.008 over 40 frames each) - both as
+ * predicted - and, as sequence means with creatures, R 0.65 / G 0.61
+ * (caustics off; 0xAA = 0.667) and R 0.64 / G 0.46 (on; 0x80 = 0.50). The
+ * R 0.64 in the last case is not explained. ?surfshade=<v> forces a level.
  */
-const DIFFUSE: Record<string, [number, number, number]> = {
-  plain: [1, 1, 1],
-  caustics: [0.5, 0.5, 0.5],
-  creatures: [0.65, 0.61, 0.61],
-  "creatures+caustics": [0.64, 0.46, 0.46],
-};
 const SHADE_OVERRIDE = new URLSearchParams(globalThis.location?.search ?? "").get("surfshade");
-// ------------------------------------------------------------------------------
+/** LIGHTSTATE_AMBIENT at init (0x4134f3). */
+const INITIAL_AMBIENT = 0x80 / 255;
 
 /** Linear fog to black, as the original sets it up from the scene depth
  * (bbox z extent): factor = (end - zEye) / (end - start), clamped. */
@@ -128,7 +128,7 @@ export class WaterSurface {
     this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
     this.mesh.frustumCulled = false;
     this.object.add(this.mesh);
-    this.configure({ caustics: false, creatures: false });
+    this.setAmbient(INITIAL_AMBIENT);
   }
 
   static async load(assetsUrl: string): Promise<WaterSurface> {
@@ -138,11 +138,10 @@ export class WaterSurface {
     return new WaterSurface(src, assetsUrl);
   }
 
-  /** Pick the measured diffuse for what else the tank draws (see DIFFUSE). */
-  configure(state: { caustics: boolean; creatures: boolean }): void {
-    const key = [state.creatures && "creatures", state.caustics && "caustics"].filter(Boolean).join("+") || "plain";
-    const d = SHADE_OVERRIDE !== null ? [1, 1, 1].map(() => Number(SHADE_OVERRIDE)) : DIFFUSE[key];
-    (this.material.uniforms.diffuse.value as THREE.Vector3).set(d[0], d[1], d[2]);
+  /** The ambient light state the previous frame left (grey 0..1): the surface's diffuse. Call once per frame. */
+  setAmbient(level: number): void {
+    const d = SHADE_OVERRIDE !== null ? Number(SHADE_OVERRIDE) : level;
+    (this.material.uniforms.diffuse.value as THREE.Vector3).setScalar(d);
   }
 
   /** Place the surface for a scene: it hangs from the top of the scene's world

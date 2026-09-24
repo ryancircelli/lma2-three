@@ -28,8 +28,9 @@
 import * as THREE from "three";
 import { type FishEntry, type FishInstance, type FishModel, loadFish } from "./fish.ts";
 import { loadXDoc } from "./xloader.ts";
-import { applyCreatureCaustics } from "./caustics.ts"; // caustics hook
-import { attachCrabShadow } from "./shadow.ts"; // caustics hook (crab shadow)
+import { applyCreatureCaustics, ownCausticClock } from "./caustics.ts"; // caustics hook
+import { attachCrabShadow, bobCrabShadow } from "./shadow.ts"; // caustics hook (crab shadow)
+import { applyFixedFunction, FISH, FLOOR, HORSE, setFixedFunctionScene } from "./fixedfunction.ts"; // [render2]
 
 /** Small seedable PRNG (mulberry32), so a given ?t= always shows the same frame. */
 function rng(seed: number): () => number {
@@ -210,6 +211,7 @@ interface Fish {
   swayPhase: number; // +0x68
   nav: Nav | null;
   sway: { w: number[]; left: number; right: number } | null;
+  caustic: ((tt: number) => void) | null; // [render2] this fish's own caustic frame (caustics.ts ownCausticClock)
 }
 
 /**
@@ -332,26 +334,11 @@ export class Tank {
 
   constructor(seed = 20260923) {
     this.random = rng(seed);
-    // Lighting, from the original (docs/original-logic.md 2.4): fish get light
-    // L2 (direction (0,-1,0.2)) at full strength over a 0.667 ambient; the crab
-    // and sea star L1 (straight down) over a 0.5 ambient. D3D lights in gamma
-    // space and saturates at 1; three.js lights linear colour, so intensities
-    // are matched at the visible flank (N.L = 0.2) and underside:
-    // a -> a^2.2, a + 0.2 d -> (a + 0.2)^2.2; x PI as three's Lambert divides by PI.
-    for (const s of [this.floor, this.glass]) s.add(new THREE.AmbientLight(0xffffff, 0.218 * Math.PI));
-    // Fish are drawn with ambient 0xaa (0.667 -> 0.41 linear; flank 0.86 -> 0.72).
-    for (const s of [this.scene, this.behind]) s.add(new THREE.AmbientLight(0xffffff, 0.41 * Math.PI));
-    for (const s of [this.scene, this.behind]) {
-      s.fog = this.fog;
-      const l2 = new THREE.DirectionalLight(0xffffff, 1.6 * Math.PI);
-      l2.position.set(0, 1, 0.2); // light travels (0,-1,0.2) in .X space = (0,-1,-0.2) here
-      s.add(l2);
-    }
-    for (const s of [this.floor, this.glass]) {
-      const l1 = new THREE.DirectionalLight(0xffffff, 0.78 * Math.PI);
-      l1.position.set(0, 1, 0);
-      s.add(l1);
-    }
+    // [render2] Lighting, fog and blending are the original's fixed-function pipeline,
+    // per creature class, in the materials themselves (src/fixedfunction.ts,
+    // applied in model()): fish L2 over ambient 0xAA with specular; the sea
+    // horse L2 over 0x80; the crab and sea star L1 over 0x80. The scenes hold
+    // no three.js lights.
   }
 
   /** Match the painting's orthographic view (called on every resize). */
@@ -403,6 +390,7 @@ export class Tank {
     this.fog.color.setHex(WATER[id] ?? 0);
     this.fog.near = 10000;
     this.fog.far = 10000 + 2 * bbox.maxZ;
+    setFixedFunctionScene({ bbox, fogColor: WATER[id] ?? 0, fogNear: this.fog.near, fogFar: this.fog.far }); // [render2]
     for (const f of this.fish) this.spawn(f);
     for (const c of this.crabs) this.placeCrab(c);
     for (const st of this.stars) this.placeStar(st);
@@ -416,8 +404,9 @@ export class Tank {
   private async model(entry: FishEntry, assetsUrl: string): Promise<FishModel> {
     let m = this.models.get(entry.slug);
     if (!m) {
-      m = await loadFish(entry, assetsUrl);
+      m = await loadFish(entry, assetsUrl, { recentre: false }); // [render2] raw .X origins, as the original draws them
       this.radii.set(entry.slug, meshRadius(m.object)); // before the shadow quad goes in
+      applyFixedFunction(m.object, m.kind === "swim" ? FISH : m.kind === "sway" ? HORSE : FLOOR); // [render2] D3D6 lighting and blending
       applyCreatureCaustics(m.object, m.kind, assetsUrl); // caustics hook: caustic / causticonfish pass
       if (m.kind === "cycle") attachCrabShadow(m.object, assetsUrl); // caustics hook: crab shadow (after caustics)
       this.models.set(entry.slug, m);
@@ -517,6 +506,9 @@ export class Tank {
       swayPhase: 0, // +0x68 is never initialised for the sea horse [unknown]; 0
       nav: null,
       sway: null,
+      // [render2] a fish's caustic frame runs on its own clock; the sea horse's
+      // pass reads a field of its own class [unknown] and stays on the scene's
+      caustic: inst && !horse ? ownCausticClock(inst.object) : null,
     };
     if (horse && inst) {
       inst.object.traverse((o) => {
@@ -779,6 +771,7 @@ export class Tank {
     c.phase += d * c.speed * 0.5 * (c.plus ? 2.5 : -2.5);
     if (c.phase < 0) c.phase += 110000;
     c.inst.setPhase(c.phase / CRAB_FRAMES);
+    bobCrabShadow(c.inst.object, c.phase); // [render2] shadow y = 3 sin(phase) - 10
     const step = d * c.speed * 0.5;
     if (step === 0) return; // standing still: the pose update is skipped
     const here = c.walk.sample();
@@ -1226,6 +1219,7 @@ export class Tank {
     }
     // painter's order, far to near (comparator 0x40dc60): also the avoidance order
     this.fish.sort((a, b) => b.mpos.z - a.mpos.z);
+    for (const f of this.fish) f.caustic?.(f.tt); // [render2] per-fish caustic frame (t + timeOffset)
   }
 
   /** Advance deterministically to time t (for ?t= snapshots). */
@@ -1254,6 +1248,25 @@ export class Tank {
   /** A sea star on the front glass, drawn last. The caller clears depth first. */
   renderGlass(renderer: THREE.WebGLRenderer): void {
     if (this.stars.some((s) => s.glass)) renderer.render(this.glass, this.camera);
+  }
+
+  /**
+   * [render2] The ambient light state (grey, 0..1) that the creatures leave set at the
+   * end of a frame, or null if they set none (the water surface inherits it:
+   * surface.ts). The last creatures drawn are those in FRONT of the
+   * foreground, far to near: the nearest one's draw sets 0xAA (a fish;
+   * 0x80 after its caustic pass when causticonfish is on) or 0x80 (a sea
+   * horse). A sea star on the glass comes after them, and its caustic pass
+   * (with `caustic`) restores 0x80. Invisible leaders draw nothing.
+   * (docs/fidelity-review.md D4; SetLightState(AMBIENT) at 0x416925,
+   * 0x40612c, 0x41f956, 0x420a65.)
+   */
+  ambientLeft(caustic: boolean, causticOnFish: boolean): number | null {
+    let nearest: Fish | null = null;
+    for (const f of this.fish) if (f.holder && f.front && (!nearest || f.mpos.z < nearest.mpos.z)) nearest = f; // the draw order's key
+    let level: number | null = nearest ? (nearest.kind === "fish" && !causticOnFish ? 0xaa : 0x80) : null;
+    if (caustic && this.stars.some((s) => s.glass)) level = 0x80;
+    return level === null ? null : level / 255;
   }
 
   /**

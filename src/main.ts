@@ -4,10 +4,13 @@
 //   ?view=tank|fish    the tank (default) or the single-species viewer
 //   ?scene=1..3        tank scene
 //   ?fish=<slug>       species for the fish viewer
-//   ?phase=0..1        fish viewer: freeze the pose
+//   ?phase=0..1        fish viewer: freeze the pose (a fish: one tail beat; else one cycle)
+//   ?sa=0..15          fish viewer: the swimming speed state (default 5)
 //   ?t=<seconds>       freeze animation time (deterministic frames for diffs)
 //   ?size=WxH          fixed canvas size in CSS px, e.g. 1024x768 (the original's mode)
 //   ?clean=1           hide all UI and play no sound (reference comparisons)
+//   ?aa=1              MSAA on (off by default: the original has none)
+//   ?tank=<slug>:<n>,...  stock only these species;  ?bare=1  no painting (flat water)
 //   ?sound=0 / ?volume=<dB>   ambient loop off / its level (see audio.ts)
 //   ?speed=0.5..4      playback speed (also the Speed selector)
 //
@@ -68,7 +71,9 @@ if (size) {
   canvas.style.width = `${size[1]}px`;
   canvas.style.height = `${size[2]}px`;
 }
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+// No MSAA: the original (Direct3D 6) draws aliased edges on the fish, crab
+// and sea star. ?aa=1 turns it back on (for looking, not for comparisons).
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: params.get("aa") === "1", preserveDrawingBuffer: true });
 // A fixed size is for pixel comparison - keep it 1:1 with CSS pixels.
 renderer.setPixelRatio(size ? 1 : Math.min(devicePixelRatio, 2));
 
@@ -218,8 +223,15 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   // ?fish=0 leaves the tank empty, for backdrop comparisons.
   if (params.get("fish") !== "0") {
     try {
-      // [feat/fish] ?all=1: one of every species (to check each one), else the configured tank.
-      const stock = params.get("all") === "1" ? Object.fromEntries(manifest.fish.map((f) => [f.slug, 1])) : manifest.tank;
+      // [feat/fish] ?all=1: one of every species (to check each one);
+      // ?tank=<slug>:<n>,... only these (like tools/wine-ref.sh LMA2_TANK);
+      // else the configured tank.
+      const only = params.get("tank")?.split(",").map((e) => e.split(":")).filter((e) => e[0]);
+      const stock = params.get("all") === "1"
+        ? Object.fromEntries(manifest.fish.map((f) => [f.slug, 1]))
+        : only?.length
+        ? Object.fromEntries(only.map(([slug, n]) => [slug, Number(n ?? 1)]))
+        : manifest.tank;
       await tank.populate(manifest.fish, stock, ASSETS);
     } catch (e) {
       fail(`fish: ${(e as Error).message}`);
@@ -227,8 +239,12 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     if (frozenT !== null) tank.simulateTo(frozenT);
     done(`scene-${select.value}`, `Scene ${select.value} · ${tank.count} creatures`);
   }
-  // water surface: its brightness depends on what else is drawn (surface.ts DIFFUSE)
-  surface.configure({ caustics: params.get("caustics") !== "0", creatures: tank.count > 0 });
+  // water surface: its diffuse is the ambient light state the previous frame
+  // left (surface.ts): the Foreground's 0xFF, 0x80 after the Relief caustics,
+  // then whatever the last creatures drawn set (Tank.ambientLeft).
+  const caustic = params.get("caustics") !== "0";
+  const causticOnFish = caustic && params.get("causticonfish") !== "0";
+  const ambientLeft = () => tank.ambientLeft(caustic, causticOnFish) ?? (caustic ? 0x80 / 255 : 1);
 
   // [feat/fish] The original's draw order (docs/original-logic.md 2.2), one
   // orthographic camera throughout: scene pass 0 (`back`); creatures BEHIND
@@ -237,10 +253,13 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   // FRONT of it, over everything; light motes; depth cleared, a sea star on
   // the glass last. Depth is cleared only where the original clears it:
   // bubbles (pass 1) write depth and so hide back creatures behind them.
+  // ?bare=1: no painting and no water surface - creatures on the flat clear
+  // colour, like tools/wine-ref.sh LMA2_BARE=1 (add rays=0&bubbles=0&caustics=0).
+  const bare = params.get("bare") === "1";
   const paint = (pass: 0 | 1) => {
     if (current) {
-      current.back.visible = pass === 0;
-      current.front.visible = pass === 1;
+      current.back.visible = pass === 0 && !bare;
+      current.front.visible = pass === 1 && !bare;
     }
     const water = scene.background; // a colour background clears: only on pass 0
     if (pass === 1) scene.background = null;
@@ -264,6 +283,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     renderer.render(nearScene, camera); // light motes (--- effects)
     renderer.clearDepth();
     tank.renderGlass(renderer); // sea star on the glass
+    surface.setAmbient(ambientLeft()); // for the NEXT frame's surface (a render-state leak in the original)
   };
 }
 
@@ -295,7 +315,14 @@ async function fishView(manifest: Manifest): Promise<(t: number) => void> {
   panel.append(label);
 
   let current: FishModel | null = null;
+  let shown: THREE.Object3D | null = null;
+  let animate: (t: number) => void = () => {};
   let token = 0;
+  // The original's own animation per kind (docs/original-logic.md 3.10, 4.1,
+  // 4.3), not a free-running whole-body morph: the fish at speed state ?sa=
+  // (0..15, default 5), the sea horse at P = 7, the crab at walking speed 1.
+  const sa = THREE.MathUtils.clamp(Number(params.get("sa") ?? 5), 0, 15);
+  const TAIL_BEAT = 2 * Math.PI / 5; // -cos(5 tt): one beat, seconds
 
   async function show(entry: FishEntry): Promise<void> {
     const mine = ++token;
@@ -309,12 +336,30 @@ async function fishView(manifest: Manifest): Promise<(t: number) => void> {
       return;
     }
     if (mine !== token) return model.dispose();
-    if (current) {
-      scene.remove(current.object);
+    if (current && shown) {
+      scene.remove(shown);
+      shown.traverse((o) => o instanceof THREE.Mesh && o.geometry.dispose()); // (an instance's own copies too)
       current.dispose();
     }
     current = model;
-    scene.add(model.object);
+    if (model.kind === "swim") {
+      // tail ripple, gills, fins, body bend and eyes, edited per frame on the
+      // CPU as the original does (fish.ts swimDeformer); ph gains 2 step a frame
+      const inst = model.instance();
+      const speed = (entry.behaviour.speed ?? 10) * 0.1;
+      shown = inst.object;
+      animate = (t) => {
+        const tt = frozenPhase !== null ? frozenPhase * TAIL_BEAT : t;
+        inst.swim!({ tt, ph: 2 * (sa + 2) * speed * tt / 150, sa, speed });
+      };
+    } else {
+      // sea horse: a = 12 k-steps, k = dt/(25 - P); crab: 2.5 * 0.5 poses per s
+      // at speed 1, 12 poses a stride; phase in cycles either way
+      const rate = model.kind === "sway" ? 12 / (25 - 7) / (2 * Math.PI) : model.kind === "cycle" ? 1.25 / 12 : 0;
+      shown = model.object;
+      animate = (t) => model.setPhase(frozenPhase ?? t * rate);
+    }
+    scene.add(shown);
 
     const dist = model.radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.15;
     camera.position.set(dist * 0.15, dist * 0.2, dist);
@@ -337,7 +382,7 @@ async function fishView(manifest: Manifest): Promise<(t: number) => void> {
   await show(initial);
 
   return (t) => {
-    current?.setPhase(frozenPhase ?? t);
+    animate(t);
     controls.update();
     renderer.render(scene, camera);
   };

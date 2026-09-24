@@ -95,13 +95,20 @@ export function causticTextures(assetsUrl: string): THREE.Texture[] {
   return frameTextures;
 }
 
+/** The caustic frame texture for time t (?causticframe= pins it). */
+function frameAt(t: number): THREE.Texture | null {
+  if (!frameTextures) return null;
+  const p = urlParams();
+  const frame = p.has("causticframe") ? Number(p.get("causticframe")) : causticClock(t).frame;
+  return frameTextures[((frame % CAUSTIC_FRAMES) + CAUSTIC_FRAMES) % CAUSTIC_FRAMES];
+}
+
 /** Advance every caustic material to time t. Called by the scene's update(). */
 export function updateCaustics(t: number): void {
   if (!frameTextures) return;
   const p = urlParams();
   const c = causticClock(t);
-  const frame = p.has("causticframe") ? Number(p.get("causticframe")) : c.frame;
-  shared.causticMap.value = frameTextures[((frame % CAUSTIC_FRAMES) + CAUSTIC_FRAMES) % CAUSTIC_FRAMES];
+  shared.causticMap.value = frameAt(t);
   const fixed = p.get("causticuv")?.split(",").map(Number);
   if (fixed?.length === 2) shared.causticOffset.value.set(fixed[0], fixed[1]);
   else shared.causticOffset.value.set(c.u, c.v);
@@ -252,9 +259,10 @@ export const CREATURE_CAUSTICS = {
  * is the tank's three.js world: X as the original's, Z mirrored. The shared
  * clock is advanced by the scene's update().
  *
- * CALIBRATE: each fish picks its frame by `t + timeOffset` (its own clock);
- * here all share the scene's frame. `light` > 0 adds a straight-down Lambert
- * term, if the pass turns out to be lit by more than the ambient.
+ * Every material starts on the scene's shared frame; ownCausticClock() gives
+ * one fish its own (each fish picks its frame by t + timeOffset, 0x4060f3).
+ * `light` > 0 adds a straight-down Lambert term, if the pass turns out to be
+ * lit by more than the ambient.
  */
 export function applyFishCaustics(
   material: THREE.Material,
@@ -264,11 +272,16 @@ export function applyFishCaustics(
   causticTextures(assetsUrl);
   const { scale = CREATURE_CAUSTICS.fish.scale, scroll = false, light = 0 } = opts;
   const prev = material.onBeforeCompile;
-  material.onBeforeCompile = (shader, renderer) => {
-    prev.call(material, shader, renderer);
-    Object.assign(shader.uniforms, shared, {
+  hooked.add(material);
+  // `this` is the material being compiled: a per-fish copy (ownCausticClock)
+  // shares this function and brings its own caustic uniforms.
+  material.onBeforeCompile = function (this: THREE.Material, shader, renderer) {
+    prev.call(this, shader, renderer);
+    Object.assign(shader.uniforms, own.get(this) ?? shared, {
       causticAmbient: { value: Number(urlParams().get("causticfishambient") ?? FISH_CAUSTIC_AMBIENT) },
       causticLight: { value: light },
+      // ?causticlit=0: the pass lit by its 0x10 ambient alone (the old model, for comparisons)
+      causticLit: { value: urlParams().get("causticlit") === "0" ? 0 : 1 },
       causticScale: { value: scale },
       causticScroll: { value: scroll ? 1 : 0 },
     });
@@ -284,7 +297,7 @@ export function applyFishCaustics(
         `#include <common>
         uniform sampler2D causticMap;
         uniform vec2 causticOffset;
-        uniform float causticAmbient, causticLight, causticScale, causticScroll;
+        uniform float causticAmbient, causticLight, causticScale, causticScroll, causticLit;
         varying vec3 vCausticWorld;
         varying vec3 vCausticNormal;
         ${SAMPLE_D3D}`,
@@ -295,14 +308,59 @@ export function applyFishCaustics(
         {
           // Original world: X as ours, Z mirrored.
           vec2 d3dUv = vec2(-vCausticWorld.z, vCausticWorld.x) * causticScale + causticOffset * causticScroll;
+          #ifdef FFP_LIGHTING
+          // The pass is drawn lit (FVF 0x112, flags 0) with the creature's own
+          // light still on (fish/horse L2, crab/star L1) over ambient 0x10, and
+          // SPECULARENABLE still set for fish: texture * clamp(0x10 + N.L)
+          // + specular, fogged to black (fixedfunction.ts varyings).
+          float lit = clamp(causticAmbient + causticLit * vFfpNL, 0.0, 1.0);
+          gl_FragColor.rgb += (causticSample(d3dUv) * lit + causticLit * vFfpSpecular) * vFfpFog;
+          #else
           float lit = causticAmbient + causticLight * max(normalize(vCausticNormal).y, 0.0);
           gl_FragColor.rgb += causticSample(d3dUv) * lit;
+          #endif
         }`,
       );
   };
   const key = material.customProgramCacheKey.bind(material);
   material.customProgramCacheKey = () => `${key()}|caustics:${scale}:${scroll}`;
   material.needsUpdate = true;
+}
+
+/** Materials carrying the caustic hook, and the per-fish uniforms of copies made by ownCausticClock(). */
+const hooked = new WeakSet<THREE.Material>();
+const own = new WeakMap<THREE.Material, typeof shared>();
+
+/**
+ * Give one creature instance (a clone sharing the template's materials) its
+ * own caustic clock: its caustic-hooked materials are replaced by copies (the
+ * same shader program; own uniforms), and the returned function shows the
+ * frame for the creature's time - for a fish, tt = t + timeOffset (0x4060f3:
+ * the pass reads fish+0x6c, which the update 0x415150 sets to t + timeOffset).
+ * Null when the instance has no caustic pass (?caustics=0 / ?causticonfish=0).
+ */
+export function ownCausticClock(object: THREE.Object3D): ((tt: number) => void) | null {
+  const uniforms: typeof shared = { causticMap: { value: shared.causticMap.value }, causticOffset: { value: new THREE.Vector2() } };
+  const copies = new Map<THREE.Material, THREE.Material>();
+  const swap = (m: THREE.Material): THREE.Material => {
+    if (!hooked.has(m)) return m;
+    let c = copies.get(m);
+    if (!c) {
+      c = m.clone();
+      c.onBeforeCompile = m.onBeforeCompile;
+      c.customProgramCacheKey = m.customProgramCacheKey;
+      own.set(c, uniforms);
+      copies.set(m, c);
+    }
+    return c;
+  };
+  object.traverse((o) => {
+    if (o instanceof THREE.Mesh) o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material);
+  });
+  if (!copies.size) return null;
+  return (tt: number) => {
+    uniforms.causticMap.value = frameAt(tt);
+  };
 }
 
 /**

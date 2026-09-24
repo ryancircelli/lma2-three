@@ -79,11 +79,23 @@ const BILLBOARDS: Record<string, Record<string, BillboardDef>> = {
 const MASK: Record<string, string> = { "1": "mask.dds" };
 
 /**
- * Class C's mask scroll phase is t + rand(0..1.9)/2 per plant in the
- * original; the random part cannot be reproduced, so every plant uses its
- * mean. CALIBRATE: per-plant phase is unmeasurable from stills.
+ * Class C's mask scroll phase, per plant: the original starts each plant's
+ * phase at (rand()%20)*0.1 (0x417070, 0x4026d0), gains 2*dt a frame, and the
+ * mask uses half of it: p = t + (rand()%20)*0.05. Its rand() is seeded from
+ * GetTickCount, so the values differ every launch; here they come from a
+ * fixed-seed generator per scene (like the tank's), so a ?t= frame is
+ * reproducible and the phases have the original's distribution.
  */
-const MASK_PHASE = 0.475;
+function maskPhases(sceneId: string): () => number {
+  let a = (0x6d61736b ^ Number(sceneId)) >>> 0; // mulberry32
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), a | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    const rand = Math.floor((((t ^ (t >>> 14)) >>> 0) / 4294967296) * 32768); // MSVC-style 0..32767
+    return (rand % 20) * 0.05;
+  };
+}
 /**
  * Open water behind the painting: one flat colour per scene. Read from the
  * original's scene setup, which stores a D3DCOLOR per scene index as an
@@ -166,6 +178,8 @@ interface Billboard {
   base: Float32Array;
   a: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   b: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+  /** Class C: this plant's mask scroll phase offset, seconds (maskPhases). */
+  maskPhase: number;
 }
 
 /**
@@ -307,6 +321,7 @@ export async function loadScene(id: string, assetsUrl: string, opts: SceneOption
   const frame3 = new THREE.Box3();
   const table = BILLBOARDS[id] ?? {};
   let caustics: Caustics | null = null; // caustics hook
+  const nextMaskPhase = maskPhases(id);
 
   // Bake each mesh's world matrix into its vertices. Object3D.applyMatrix4()
   // would decompose it into position/rotation/scale and silently DROP any
@@ -369,7 +384,10 @@ export async function loadScene(id: string, assetsUrl: string, opts: SceneOption
       const base = new Float32Array([x0, y0, z, x0, y1, z, x1, y1, z, x1, y0, z]);
       const mk = (tex: string, sub: number) => {
         const map = textures.get(tex)!.clone();
-        map.wrapS = map.wrapT = THREE.ClampToEdgeWrapping; // sprites: never wrap
+        // Class A sets ADDRESSU/V = CLAMP; B, C and D leave the default WRAP
+        // (docs/original-logic.md 8), so bilinear filtering at their quad
+        // edges blends in the opposite edge of the texture.
+        map.wrapS = map.wrapT = def.cls === "A" ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
         map.needsUpdate = true;
         const mat = new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false, side: THREE.DoubleSide });
         const obj = new THREE.Mesh(billboardQuad(base), mat);
@@ -378,7 +396,7 @@ export async function loadScene(id: string, assetsUrl: string, opts: SceneOption
         front.add(obj);
         return obj;
       };
-      const bb: Billboard = { cls: def.cls, base, a: mk(def.tex[0], 0), b: mk(def.tex[1], 1) };
+      const bb: Billboard = { cls: def.cls, base, a: mk(def.tex[0], 0), b: mk(def.tex[1], 1), maskPhase: def.cls === "C" ? nextMaskPhase() : 0 };
       const maskName = MASK[id];
       if (def.cls === "C" && maskName) {
         const mask = textures.get(maskName)!.clone();
@@ -413,7 +431,7 @@ export async function loadScene(id: string, assetsUrl: string, opts: SceneOption
       const mask = bb.b.material.alphaMap;
       if (mask) {
         // D3D v runs down the image; three's up - hence the sign on y.
-        const p = t + MASK_PHASE;
+        const p = t + bb.maskPhase;
         mask.offset.set(0.1 * Math.sin(p), -0.1 * Math.cos(p));
       }
     }

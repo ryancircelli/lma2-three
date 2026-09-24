@@ -40,9 +40,12 @@ export WINEPREFIX="$PREFIX" WINEARCH=win32 WINEDEBUG="${LMA2_WINEDEBUG:--all}"
 #   LMA2_SECONDS=20     with LMA2_GRAB=fast: poll for this long, keep only new
 #                        renders (each timed by its first appearance)
 #   LMA2_WINEDEBUG=fps   wined3d prints the app's frame rate to stderr
+#   LMA2_VOLUME=0        no light rays (<volume> drives the RAYS, not the sound -
+#                        docs/original-logic.md 5.1); default: as installed (1)
 #   LMA2_TANK="Sea Horse=2,Flame Angel=3"   stock ONLY these species (with fish=1);
 #                        a species missing from settings.xml gets a line added
 EXTRA_SED=(-e 's/x/x/')
+[ -n "${LMA2_VOLUME:-}" ] && EXTRA_SED+=(-e "s/<volume value=\"[0-9]*\"/<volume value=\"$LMA2_VOLUME\"/")
 [ -n "${LMA2_SCHOOLING:-}" ] && EXTRA_SED+=(-e "s/<schooling value=\"[0-9]*\"/<schooling value=\"$LMA2_SCHOOLING\"/")
 #   LMA2_BARE=1          no water/bubbles/foreground/background: creatures on
 #                        flat water, rendered many times faster (see notes)
@@ -106,7 +109,6 @@ cmd_capture() {
       -e "s/<caustic value=\"[0-9]*\"/<caustic value=\"$caustic\"/" \
       -e "s/<causticonfish value=\"[0-9]*\"/<causticonfish value=\"$caustic\"/" \
       -e 's/<sound value="[0-9]*"/<sound value="0"/' \
-      -e 's/<volume value="[0-9]*"/<volume value="0"/' \
       -e "$fishexpr" "${EXTRA_SED[@]}" \
       "$APP_DIR/settings.base.xml" > "$APP_DIR/settings.xml"
   out="$(realpath -m "$out")"
@@ -133,7 +135,6 @@ cmd_sequence() {
       -e "s/<caustic value=\"[0-9]*\"/<caustic value=\"$caustic\"/" \
       -e "s/<causticonfish value=\"[0-9]*\"/<causticonfish value=\"$caustic\"/" \
       -e 's/<sound value="[0-9]*"/<sound value="0"/' \
-      -e 's/<volume value="[0-9]*"/<volume value="0"/' \
       -e "$fishexpr" "${EXTRA_SED[@]}" \
       "$APP_DIR/settings.base.xml" > "$APP_DIR/settings.xml"
   outdir="$(realpath -m "$outdir")"
