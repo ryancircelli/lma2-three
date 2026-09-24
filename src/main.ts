@@ -161,9 +161,11 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
 
   // ?seed=N: the creatures draw from the original's MSVC rand() seeded with N,
   // as a launch whose GetTickCount() was N would (0x412483). ?seed=time: a new
-  // seed per load, the original's own behaviour. No ?seed: a fixed stream, so
-  // captures and ?t= frames repeat.
-  const seedParam = params.get("seed");
+  // seed per load, the original's own behaviour - and the default for normal
+  // viewing. Reference captures (?t= or ?clean=1) default to a fixed stream so
+  // frames repeat; ?seed=fixed forces that stream anywhere.
+  const capture = frozenT !== null || params.get("clean") === "1";
+  const seedParam = params.get("seed") === "fixed" ? null : params.get("seed") ?? (capture ? null : "time");
   const tank = seedParam === null
     ? new Tank()
     : new Tank(seedParam === "time" ? Math.floor(performance.timeOrigin + performance.now()) >>> 0 : Number(seedParam) >>> 0, true);
