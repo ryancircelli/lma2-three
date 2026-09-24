@@ -112,19 +112,22 @@ export class MoteSim {
     this.nextSpawn = 0;
   }
 
-  /** A random point of the mote box on a tenths grid: x across the full width,
-   * y from min.y + 0.2H to max.y, z in the front half (min.z .. min.z + depth/2). */
+  /** A random point of the mote box on a NINTHS grid, 0..1 inclusive
+   * ((rand()%10) * 0.11111111 at 0x406e10, constant 0x4588b4): x across the
+   * full width, y from min.y + 0.2H to max.y, z in the front half. */
   private point(): THREE.Vector3 {
     const { min, max } = this.box;
-    const f = () => (this.rand() % 11) / 10; // tenths, 0..1 [inferred: whether 1.0 is included]
+    const f = () => (this.rand() % 10) * 0.11111111;
     const H = max.y - min.y, D = max.z - min.z;
     return new THREE.Vector3(min.x + f() * (max.x - min.x), min.y + 0.2 * H + f() * 0.8 * H, min.z + f() * 0.5 * D);
   }
 
+  /** 0x406e10, in its rand() order: start point, end point, size, speed. */
   private spawn(u: number): void {
-    const spd = 1 + 0.1 * (this.rand() % 10);
+    const a = this.point(), b = this.point();
     const size = 0.5 + 0.05 * (this.rand() % 10);
-    this.motes.push({ id: this.nextId++, a: this.point(), b: this.point(), u, rate: 0.02 * spd, size });
+    const spd = 1 + 0.1 * (this.rand() % 10);
+    this.motes.push({ id: this.nextId++, a, b, u, rate: 0.02 * spd, size });
   }
 
   private step(dt: number): void {

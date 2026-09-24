@@ -273,7 +273,8 @@ interface Star {
   walk: PathWalker;
   plus: boolean; // +0xb4: walking toward +x
   yaw: number; // +0xac, D3D sense
-  arms: { mesh: THREE.Mesh; base: Float32Array; arms: { verts: number[]; axis: THREE.Vector3; diag2: number }[] } | null;
+  /** Per arm: its vertices, and per vertex the squared bbox diagonal of its material subset (Top<i> or Bottom<i>). */
+  arms: { mesh: THREE.Mesh; base: Float32Array; arms: { verts: number[]; diag2: number[] }[] } | null;
 }
 
 /** Scene clear colours (docs/original-logic.md 2.3): the sea horse's fog colour. */
@@ -281,29 +282,6 @@ const WATER: Record<string, number> = { "1": 0x008aff, "2": 0x00cbfd, "3": 0x036
 
 /** The crab's walk phase counts pose FRAMES: pose int(phase)%12+1 blended into the next. */
 const CRAB_FRAMES = 12;
-
-/** Bounding sphere as the original computes it (0x42ef70): max distance from the vertex centroid. */
-function meshRadius(object: THREE.Object3D): number {
-  object.updateMatrixWorld(true);
-  const inv = object.matrixWorld.clone().invert();
-  const pts: THREE.Vector3[] = [];
-  const c = new THREE.Vector3();
-  object.traverse((o) => {
-    if (!(o instanceof THREE.Mesh) || o.name === "crab-shadow") return;
-    const p = o.geometry.getAttribute("position");
-    const m = inv.clone().multiply(o.matrixWorld);
-    for (let i = 0; i < p.count; i++) {
-      const v = new THREE.Vector3().fromBufferAttribute(p, i).applyMatrix4(m);
-      pts.push(v);
-      c.add(v);
-    }
-  });
-  if (!pts.length) return 0;
-  c.divideScalar(pts.length);
-  let r = 0;
-  for (const v of pts) r = Math.max(r, v.distanceTo(c));
-  return r;
-}
 
 export class Tank {
   /** Creatures in FRONT of the foreground painting (drawn last). */
@@ -323,7 +301,6 @@ export class Tank {
   private crabs: Crab[] = [];
   private stars: Star[] = [];
   private models = new Map<string, FishModel>();
-  private radii = new Map<string, number>();
   private random: () => number;
   private data: SceneData | null = null;
   private sceneId: string | null = null;
@@ -420,7 +397,6 @@ export class Tank {
     let m = this.models.get(entry.slug);
     if (!m) {
       m = await loadFish(entry, assetsUrl, { recentre: false }); // [render2] raw .X origins, as the original draws them
-      this.radii.set(entry.slug, meshRadius(m.object)); // before the shadow quad goes in
       applyFixedFunction(m.object, m.kind === "swim" ? FISH : m.kind === "sway" ? HORSE : FLOOR); // [render2] D3D6 lighting and blending
       applyCreatureCaustics(m.object, m.kind, assetsUrl); // caustics hook: caustic / causticonfish pass
       if (m.kind === "cycle") attachCrabShadow(m.object, assetsUrl); // caustics hook: crab shadow (after caustics)
@@ -483,7 +459,7 @@ export class Tank {
       aggRef: 1, // base constructor 0x406ae0
       behav: b.behav ?? 1,
       school: (b.school ?? 0) > 0,
-      meshR: this.radii.get(entry.slug) ?? model.radius,
+      meshR: model.fileRadius, // +0x4c: the whole-file bounding sphere (0x431ad0 -> 0x42ef70)
       isLeader,
       leader,
       timeOffset,
@@ -521,9 +497,12 @@ export class Tank {
       swayPhase: 0, // +0x68 is never initialised for the sea horse [unknown]; 0
       nav: null,
       sway: null,
-      // [render2] a fish's caustic frame runs on its own clock; the sea horse's
-      // pass reads a field of its own class [unknown] and stays on the scene's
-      caustic: inst && !horse ? ownCausticClock(inst.object) : null,
+      // [render2] the caustic frame of the fish/sea-horse pass (0x406050) is
+      // picked from the creature's +0x6c: the fish writes t + timeOffset there
+      // (0x4151eb); the sea horse never writes it, so it keeps the base
+      // constructor's 0 (0x406b4b) and shows caustics_01 forever [read]. f.tt
+      // is 0 for a sea horse throughout (updateHorse never sets it).
+      caustic: inst ? ownCausticClock(inst.object) : null,
     };
     if (horse && inst) {
       inst.object.traverse((o) => {
@@ -864,26 +843,27 @@ export class Tank {
     st.walk.u = 0;
   }
 
-  /** The five arms (materials Top<i>/Bottom<i>): vertex lists, axis and reach. */
+  /**
+   * The five arms (materials SNFMat_Top<i> / SNFMat_Bottom<i>, 0x420db0): each
+   * material subset keeps its own bounding box (0x41fe90), and a vertex's
+   * weight divides by that box's squared diagonal (0x420050) [read].
+   */
   private prepareArms(mesh: THREE.Mesh): Star["arms"] {
     const g = mesh.geometry = mesh.geometry.clone();
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     const P = (g.getAttribute("position") as THREE.BufferAttribute).array as Float32Array;
-    const arms = new Map<string, { verts: number[]; axis: THREE.Vector3; diag2: number }>();
+    const arms = new Map<string, { verts: number[]; diag2: number[] }>();
     for (const gr of g.groups) {
       const m = /(?:Top|Bottom)(\d)/.exec(mats[gr.materialIndex ?? 0]?.name ?? "");
       if (!m) continue;
-      const a = arms.get(m[1]) ?? { verts: [], axis: new THREE.Vector3(), diag2: 0 };
-      for (let v = gr.start; v < gr.start + gr.count; v++) a.verts.push(v);
-      arms.set(m[1], a);
-    }
-    for (const a of arms.values()) {
-      for (const v of a.verts) {
-        const x = P[v * 3], z = P[v * 3 + 2];
-        a.axis.x += x, a.axis.z += z;
-        a.diag2 = Math.max(a.diag2, x * x + P[v * 3 + 1] ** 2 + z * z);
+      const a = arms.get(m[1]) ?? { verts: [], diag2: [] };
+      const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+      for (let v = gr.start; v < gr.start + gr.count; v++) {
+        for (let k = 0; k < 3; k++) lo[k] = Math.min(lo[k], P[v * 3 + k]), hi[k] = Math.max(hi[k], P[v * 3 + k]);
       }
-      a.axis.normalize();
+      const d2 = (hi[0] - lo[0]) ** 2 + (hi[1] - lo[1]) ** 2 + (hi[2] - lo[2]) ** 2;
+      for (let v = gr.start; v < gr.start + gr.count; v++) a.verts.push(v), a.diag2.push(d2);
+      arms.set(m[1], a);
     }
     mesh.frustumCulled = false;
     return { mesh, base: P.slice(), arms: [...arms.entries()].sort().map(([, a]) => a) };
@@ -904,22 +884,22 @@ export class Tank {
     const p = s.walk.sample();
     s.holder.position.set(p.x, p.y + (s.glass ? 100 : 0), -b.minZ);
     // arms curl: s = sin(0.2 t + i pi/4); lifted by w|5s|, turned about Y by
-    // w*0.5s, with w = max(0, |v|^2/diag^2 - 0.4) (diag: taken as the arm's reach [inferred])
+    // w*0.5s, with w = max(0, |v|^2/diag^2 - 0.4), diag = the subset's bbox diagonal (0x420050)
     if (!s.arms || !this.animate) return;
     const attr = s.arms.mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
     const P = attr.array as Float32Array, B = s.arms.base;
     P.set(B);
     s.arms.arms.forEach((a, i) => {
       const sn = Math.sin(0.2 * t + i * Math.PI / 4), lift = Math.abs(5 * sn);
-      for (const v of a.verts) {
+      a.verts.forEach((v, j) => {
         const x = B[v * 3], y = B[v * 3 + 1], z = B[v * 3 + 2];
-        const w = Math.max(0, (x * x + y * y + z * z) / a.diag2 - 0.4);
-        if (!w) continue;
+        const w = Math.max(0, (x * x + y * y + z * z) / a.diag2[j] - 0.4);
+        if (!w) return;
         const ang = w * 0.5 * sn, c = Math.cos(ang), si = Math.sin(ang); // about the star's Y
         P[v * 3] = x * c + z * si;
         P[v * 3 + 1] = y + w * lift;
         P[v * 3 + 2] = -x * si + z * c;
-      }
+      });
     });
     attr.needsUpdate = true;
   }
