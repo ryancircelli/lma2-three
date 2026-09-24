@@ -1,0 +1,78 @@
+// Screensaver settings, per user, in HKCU\Software\LMA2Screensaver. They map
+// onto the site's own URL parameters.
+
+using System.Collections.Generic;
+using Microsoft.Win32;
+
+namespace Lma2Saver
+{
+    internal sealed class Settings
+    {
+        private const string Key = @"Software\LMA2Screensaver";
+
+        public string Scene = "rotate"; // rotate | 1 | 2 | 3 (rotate: next scene each run, as the original)
+        public string Aspect = "fit";   // fit | fill | stretch
+        public bool Sound = true;       // the original's ambient loop (primary monitor only)
+        public string Speed = "1";      // 0.5 .. 4
+        public string Tank = "installed"; // installed (the original's default tank) | all (one of every species)
+        public bool Schooling = true;
+        public bool AllMonitors = true; // false: black on the other monitors
+
+        public static Settings Load()
+        {
+            var s = new Settings();
+            using (RegistryKey k = Registry.CurrentUser.OpenSubKey(Key))
+            {
+                if (k == null) return s;
+                s.Scene = Str(k, "Scene", s.Scene, "rotate", "1", "2", "3");
+                s.Aspect = Str(k, "Aspect", s.Aspect, "fit", "fill", "stretch");
+                s.Sound = Flag(k, "Sound", s.Sound);
+                s.Speed = Str(k, "Speed", s.Speed, "0.5", "1", "1.5", "2", "3", "4");
+                s.Tank = Str(k, "Tank", s.Tank, "installed", "all");
+                s.Schooling = Flag(k, "Schooling", s.Schooling);
+                s.AllMonitors = Flag(k, "AllMonitors", s.AllMonitors);
+            }
+            return s;
+        }
+
+        public void Save()
+        {
+            using (RegistryKey k = Registry.CurrentUser.CreateSubKey(Key))
+            {
+                k.SetValue("Scene", Scene);
+                k.SetValue("Aspect", Aspect);
+                k.SetValue("Sound", Sound ? 1 : 0, RegistryValueKind.DWord);
+                k.SetValue("Speed", Speed);
+                k.SetValue("Tank", Tank);
+                k.SetValue("Schooling", Schooling ? 1 : 0, RegistryValueKind.DWord);
+                k.SetValue("AllMonitors", AllMonitors ? 1 : 0, RegistryValueKind.DWord);
+            }
+        }
+
+        /// <summary>The page URL's query string for one screen.</summary>
+        public string Query(bool withSound, bool preview)
+        {
+            var q = new List<string> { "saver=1", "aspect=" + Aspect };
+            // A preview must not advance the scene rotation.
+            if (Scene != "rotate") q.Add("scene=" + Scene);
+            else if (preview) q.Add("scene=1");
+            if (!Sound || !withSound) q.Add("sound=0");
+            if (Speed != "1") q.Add("speed=" + Speed);
+            if (Tank == "all") q.Add("all=1");
+            if (!Schooling) q.Add("school=0");
+            return "?" + string.Join("&", q);
+        }
+
+        private static string Str(RegistryKey k, string name, string fallback, params string[] allowed)
+        {
+            string v = k.GetValue(name) as string;
+            return v != null && System.Array.IndexOf(allowed, v) >= 0 ? v : fallback;
+        }
+
+        private static bool Flag(RegistryKey k, string name, bool fallback)
+        {
+            object v = k.GetValue(name);
+            return v is int ? (int)v != 0 : fallback;
+        }
+    }
+}

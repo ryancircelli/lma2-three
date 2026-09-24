@@ -4,6 +4,13 @@
 
 TypeScript throughout, run and bundled with Deno. No Node, no ffmpeg, no system dependencies.
 
+- **Watch it:** https://lma2.ryancircelli.com
+- **Windows screensaver:** [LMA2-Aquarium.scr](https://github.com/ryancircelli/lma2-three/releases/latest/download/LMA2-Aquarium.scr)
+  (latest release; all releases: https://github.com/ryancircelli/lma2-three/releases)
+
+The original's art, models, textures and sound are Freeze.com / Triodesign's, extracted from the 2005 screensaver
+(`deno task extract`); this repo only reimplements how it runs.
+
 ## Quick start
 
 Needs Deno 2.x and a Living Marine Aquarium 2 install. From WSL the Windows install is read at `/mnt/c/Program Files (x86)/...`
@@ -104,6 +111,22 @@ Live at **https://lma2.ryancircelli.com**. The panel (top left) has:
 
 Randomness: normal viewing seeds the original's MSVC `rand()` from the clock, like the original's `srand(GetTickCount())`, so
 every load is a fresh launch. `?seed=N` replays one; reference captures (`?t=`, `?clean=1`) use a fixed stream.
+
+## Windows screensaver
+
+`screensaver/` wraps the site as a real Windows screensaver: one `.scr` with the built site embedded, rendered offline by
+WebView2 (the Edge engine built into Windows 10/11) on .NET Framework 4.8 (also built in), so nothing needs installing.
+
+- **Install:** download [LMA2-Aquarium.scr](https://github.com/ryancircelli/lma2-three/releases/latest/download/LMA2-Aquarium.scr),
+  double-click it, press **Install as my screensaver**. That copies it to `%LOCALAPPDATA%\LMA2Screensaver\` and selects it in
+  Screen Saver Settings. The file isn't code-signed, so SmartScreen may warn: *More info* > *Run anyway*.
+- **Behaviour:** `/s` fills every monitor (or only the primary, by setting) and, like the original, exits on any key, mouse
+  button, or a mouse move of more than 120 px; sound plays on the primary monitor only. `/p` draws the Screen Saver Settings
+  preview; `/c` (or a double-click) opens its settings: scene, widescreen mode, speed, fish, schooling, sound, monitors
+  (stored in `HKCU\Software\LMA2Screensaver`). Test modes: `/w` (a normal window) and `/selftest <dir>`.
+- **Releases:** `.github/workflows/release.yml` builds it on every change to the site or `screensaver/` (Windows runner:
+  `deno task build/stage`, zip `_site/` into `screensaver/site.zip`, `dotnet build`), publishes release `v1.0.<run>` with
+  `LMA2-Aquarium.scr`, and keeps the 5 newest, so the `releases/latest/download/...` link above is always current.
 
 ## Fidelity
 

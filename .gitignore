@@ -17,3 +17,8 @@
 
 # Parallel agent worktrees
 /.worktrees/
+
+# Screensaver build (screensaver/): the embedded site zip and build output
+/screensaver/site.zip
+/screensaver/bin/
+/screensaver/obj/

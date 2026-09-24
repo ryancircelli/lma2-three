@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The Windows screensaver. .NET Framework 4.8 is built into Windows 10/11, so
+    the .scr needs no runtime install; WebView2 (Edge) is built in too.
+    Build (CI, .github/workflows/release.yml):
+      deno task build && deno task stage     ; the site in _site/
+      zip _site/* to screensaver/site.zip
+      dotnet build screensaver -c Release -p:Version=1.0.N
+    then rename bin/Release/net48/LMA2.exe to LMA2-Aquarium.scr.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>LMA2</AssemblyName>
+    <RootNamespace>Lma2Saver</RootNamespace>
+    <LangVersion>8.0</LangVersion>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version Condition="'$(Version)' == ''">1.0.0</Version>
+    <Product>Living Marine Aquarium 2 (three.js remake)</Product>
+    <Description>Living Marine Aquarium 2 screensaver</Description>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Everything is embedded: nothing needs to sit beside the .scr. -->
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" GeneratePathProperty="true" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="site.zip" LogicalName="site.zip" />
+    <EmbeddedResource Include="$(PkgMicrosoft_Web_WebView2)\lib\net462\Microsoft.Web.WebView2.Core.dll" LogicalName="Microsoft.Web.WebView2.Core.dll" />
+    <EmbeddedResource Include="$(PkgMicrosoft_Web_WebView2)\lib\net462\Microsoft.Web.WebView2.WinForms.dll" LogicalName="Microsoft.Web.WebView2.WinForms.dll" />
+    <EmbeddedResource Include="$(PkgMicrosoft_Web_WebView2)\runtimes\win-x64\native\WebView2Loader.dll" LogicalName="WebView2Loader.x64.dll" />
+    <EmbeddedResource Include="$(PkgMicrosoft_Web_WebView2)\runtimes\win-x86\native\WebView2Loader.dll" LogicalName="WebView2Loader.x86.dll" />
+    <EmbeddedResource Include="$(PkgMicrosoft_Web_WebView2)\runtimes\win-arm64\native\WebView2Loader.dll" LogicalName="WebView2Loader.arm64.dll" />
+  </ItemGroup>
+</Project>

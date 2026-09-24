@@ -68,6 +68,9 @@ const status: Status = { ready: false, view, subject: null, detail: null, error:
 window.lma2 = status;
 
 if (params.get("clean") === "1") document.body.classList.add("clean");
+// ?saver=1: running as the Windows screensaver (screensaver/): no UI and no
+// cursor, but unlike ?clean=1 it keeps sound and the per-launch random seed.
+if (params.get("saver") === "1") document.body.classList.add("clean", "saver");
 
 // --- renderer ----------------------------------------------------------------
 
@@ -511,6 +514,7 @@ async function main(): Promise<void> {
   }
 
   setupFullscreen();
+  addLinks();
 
   const clock = new THREE.Clock();
   let simT = 0;
@@ -519,6 +523,27 @@ async function main(): Promise<void> {
     status.time = frozenT ?? simT;
     frame(status.time);
   });
+}
+
+// The source, and the Windows screensaver build (screensaver/, published by
+// .github/workflows/release.yml; "latest" always points at the newest release).
+const GITHUB = "https://github.com/ryancircelli/lma2-three";
+const SCREENSAVER = `${GITHUB}/releases/latest/download/LMA2-Aquarium.scr`;
+
+function addLinks(): void {
+  const link = (text: string, href: string, title: string) => {
+    const a = document.createElement("a");
+    a.href = href;
+    a.textContent = text;
+    a.title = title;
+    a.target = "_blank";
+    a.rel = "noopener";
+    return a;
+  };
+  panel.append(
+    link("Screensaver ↓", SCREENSAVER, "Download the Windows screensaver (.scr): double-click it, then Install as my screensaver"),
+    link("GitHub", GITHUB, "Source code and releases"),
+  );
 }
 
 // Fullscreen: a panel button, F, or double-click on the scene. While
