@@ -875,3 +875,89 @@ the sections above leave out.
 - **Registry failure** [read]. If `SceneIndex` cannot be written, the index
   function returns 0. The code then uses the out-of-range defaults (colour 0,
   level 0.3), and loading `SCENES/0` fails.
+
+## 9. Addendum: crab, sea star and sea horse cross-check
+
+A second pass over section 4 (crab, sea star, sea horse), from separate
+notes. Section 4 agrees with it. These are the details it leaves out, plus
+one open point.
+
+### Caustic UV scale on creatures (two different constants) [read]
+
+| creatures | pass | UV rule | constant | read at |
+|---|---|---|---|---|
+| crab | 0x408cc0 | `u = z*0.0025 - (dt*0.5)/6`, `v = x*0.0025 - dt*0.5` | 0.0025 at 0x458948 | `fmul` at 0x408d5d and 0x408d75 (the 1/6 is at 0x4588f8, used at 0x408cf3) |
+| sea star | 0x41fad0 | same | 0.0025 at 0x458948 | `fmul` at 0x41fb6d and 0x41fb85 (1/6 at 0x41fb05) |
+| fish and **sea horse** | 0x403660 | `u = z*0.01`, `v = x*0.01` | 0.01 at 0x458568 | `fmul` at 0x4036ed and 0x403701 |
+
+- The crab and sea star tile the caustic texture every 400 world units; the
+  fish and the sea horse tile it every 100.
+- The sea horse draws through the fish caustic routine (0x41f7f0 calls
+  0x403660), so it uses 0.01, not 0.0025.
+
+### Mood timer durations actually rolled [read]
+
+- A duration is `rand()%(max/2) + max/2` in whole units.
+  - crab: max = 5, so 2 or 3 s
+  - sea horse: max = 4, so 2 or 3 units of its own clock
+- The sea horse clock advances `2*dt/(25-P)`, so one mood lasts about 10 s
+  (fast, P = 15) to about 37 s (slow, P = 0) of real time.
+
+### Crab details [read]
+
+- **Turn gating:** an edge turn starts only when no turn is already running.
+- **When the walk stops:** if `step == 0` (speed < 0.05), the whole
+  position/orientation update is skipped that frame. The walk-phase update
+  still runs, but with a zero step.
+- **Orientation frame:** built from the path tangent and world down, rows
+  `[right, up, f, position]`:
+  - `f = normalize(forward)`
+  - `right = normalize(f x (0,-1,0))`
+  - `up = right x f`
+- **Shadow quad:** a 4-vertex TRIANGLEFAN of D3DLVERTEX (FVF 0x1e2). Corners
+  (+-100, s, +-100) with UVs:
+  - (-100,-100) -> (0,1)
+  - (-100,+100) -> (0,0)
+  - (+100,+100) -> (1,0)
+  - (+100,-100) -> (1,1)
+- **Walk-phase wrap:** when the phase goes below 0, 110000 is added (0x458974).
+
+### Sea star details [read]
+
+- **Tangent:** a finite difference of the spline at u +- 0.005 (0x4584c8),
+  taken in the direction of travel. The frame is built as for the crab.
+- **Path window:** at load the sorted path list is rotated until the first
+  window point lies in [min.x + 0.7*W, max.x].
+- **Glass variant:** the +100 in y is added to the freshly rebuilt frame's
+  translation (matrix _42) each frame, so it does not accumulate.
+  Order: +100 is added, then the roll RotZ(+pi/2) and the spin RotY are
+  applied.
+- **Arm vertices:** a vertex is deformed only while it still equals the
+  pristine copy (tolerance 1e-5). The mesh is restored from the pristine copy
+  at the start of every update.
+
+### Sea horse details [read]
+
+- **Pose morph:** blends normals as well as positions (0x403ab0).
+- **Steer (0x41fa30):** a non-zero avoidance vector (|v|^2 > 1e-4) forces a
+  slow-down. The mood start is stamped with the sway phase (+0x68) instead of
+  its own clock (+0xa4); this looks like a bug.
+- **Navigator pre-simulation:** at init the navigator pre-simulates
+  `rand()%45 + 10` steps from the box centre (0x4191a0).
+- **Fog colour table:** the fog colour switch at 0x41f835 reads field +0x84.
+  - No sea-horse code path writes +0x84, which confirms the [unknown] in 4.3.
+  - Its table is 1 -> 0xff00cbfd, 2 -> 0xff008aff, 3 -> 0xff036ed6. Scenes 1
+    and 2 are swapped compared with the fish table (0x416783, which reads the
+    scene index at fish+0x150 and matches the clear colours).
+  - So even a correctly initialised field would give the wrong fog colour in
+    scenes 1 and 2. Rebuild: use the scene clear colour, as for the fish.
+
+### One point to re-check (fish floor, 3.5) [inferred]
+
+- In 0x415150 the fish's y is saved, raised to at least the Crab_Path floor
+  (via 0x417220), and later restored along with x and z (the stores back to
+  +0xc4/+0xc8/+0xcc near the end of the orientation block).
+- The clamp may therefore only affect the pose and steering computed in
+  between, not the stored position. Section 3.5 describes it as a soft
+  per-frame raise. Whoever owns fish motion should confirm which values are
+  written back.
