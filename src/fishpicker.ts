@@ -45,6 +45,19 @@ export function fishPicker(o: FishPickerOptions): void {
   label();
 
   // --- contents ---------------------------------------------------------------
+  const head = document.createElement("div");
+  head.className = "fp-head";
+  const title = document.createElement("strong");
+  title.textContent = "Fish in the tank";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "fp-close";
+  close.title = "Close (Esc)";
+  close.setAttribute("aria-label", "Close");
+  close.textContent = "\u00d7";
+  close.addEventListener("click", () => setOpen(false));
+  head.append(title, close);
+
   const presets = document.createElement("div");
   presets.className = "fp-presets";
   const preset = (text: string, title: string, make: () => Stock) => {
@@ -125,7 +138,7 @@ export function fishPicker(o: FishPickerOptions): void {
     }
   });
   foot.append(schoolLabel, apply);
-  pop.append(presets, list, foot);
+  pop.append(head, presets, list, foot);
 
   // --- state -----------------------------------------------------------------
   const key = () => JSON.stringify([counts, schooling]);

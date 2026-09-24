@@ -17,12 +17,16 @@
     #info.error { color: #ffb4a8; }
     /* ?clean=1 - nothing but the canvas, for reference comparisons */
     body.clean #panel, body.clean #info { display: none; }
+    /* The hidden attribute must beat any display rule (e.g. the picker's flex). */
+    [hidden] { display: none !important; }
     /* Fish picker (fishpicker.ts) */
     #fishpicker {
       position: fixed; z-index: 2; width: min(340px, calc(100vw - 24px)); max-height: calc(100vh - 90px);
       display: flex; flex-direction: column; gap: 8px; padding: 10px 12px;
       background: rgba(4, 22, 34, 0.92); border: 1px solid rgba(160, 210, 240, 0.18); border-radius: 8px;
     }
+    #fishpicker .fp-head { display: flex; justify-content: space-between; align-items: center; }
+    #fishpicker .fp-close { font-size: 18px; line-height: 1; width: 1.6em; height: 1.6em; padding: 0; }
     #fishpicker .fp-presets, #fishpicker .fp-foot { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     #fishpicker .fp-foot { justify-content: space-between; }
     #fishpicker .fp-list { overflow-y: auto; display: grid; gap: 2px; padding-right: 4px; }
