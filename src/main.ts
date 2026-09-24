@@ -4,7 +4,8 @@
 //   ?view=tank|fish    the tank (default) or the single-species viewer
 //   ?scene=1..3        tank scene
 //   ?fish=<slug>       species for the fish viewer
-//   ?phase=0..1        fish viewer: freeze the pose
+//   ?phase=0..1        fish viewer: freeze the pose (a fish: one tail beat; else one cycle)
+//   ?sa=0..15          fish viewer: the swimming speed state (default 5)
 //   ?t=<seconds>       freeze animation time (deterministic frames for diffs)
 //   ?size=WxH          fixed canvas size in CSS px, e.g. 1024x768 (the original's mode)
 //   ?clean=1           hide all UI and play no sound (reference comparisons)
@@ -308,7 +309,14 @@ async function fishView(manifest: Manifest): Promise<(t: number) => void> {
   panel.append(label);
 
   let current: FishModel | null = null;
+  let shown: THREE.Object3D | null = null;
+  let animate: (t: number) => void = () => {};
   let token = 0;
+  // The original's own animation per kind (docs/original-logic.md 3.10, 4.1,
+  // 4.3), not a free-running whole-body morph: the fish at speed state ?sa=
+  // (0..15, default 5), the sea horse at P = 7, the crab at walking speed 1.
+  const sa = THREE.MathUtils.clamp(Number(params.get("sa") ?? 5), 0, 15);
+  const TAIL_BEAT = 2 * Math.PI / 5; // -cos(5 tt): one beat, seconds
 
   async function show(entry: FishEntry): Promise<void> {
     const mine = ++token;
@@ -322,12 +330,30 @@ async function fishView(manifest: Manifest): Promise<(t: number) => void> {
       return;
     }
     if (mine !== token) return model.dispose();
-    if (current) {
-      scene.remove(current.object);
+    if (current && shown) {
+      scene.remove(shown);
+      shown.traverse((o) => o instanceof THREE.Mesh && o.geometry.dispose()); // (an instance's own copies too)
       current.dispose();
     }
     current = model;
-    scene.add(model.object);
+    if (model.kind === "swim") {
+      // tail ripple, gills, fins, body bend and eyes, edited per frame on the
+      // CPU as the original does (fish.ts swimDeformer); ph gains 2 step a frame
+      const inst = model.instance();
+      const speed = (entry.behaviour.speed ?? 10) * 0.1;
+      shown = inst.object;
+      animate = (t) => {
+        const tt = frozenPhase !== null ? frozenPhase * TAIL_BEAT : t;
+        inst.swim!({ tt, ph: 2 * (sa + 2) * speed * tt / 150, sa, speed });
+      };
+    } else {
+      // sea horse: a = 12 k-steps, k = dt/(25 - P); crab: 2.5 * 0.5 poses per s
+      // at speed 1, 12 poses a stride; phase in cycles either way
+      const rate = model.kind === "sway" ? 12 / (25 - 7) / (2 * Math.PI) : model.kind === "cycle" ? 1.25 / 12 : 0;
+      shown = model.object;
+      animate = (t) => model.setPhase(frozenPhase ?? t * rate);
+    }
+    scene.add(shown);
 
     const dist = model.radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.15;
     camera.position.set(dist * 0.15, dist * 0.2, dist);
@@ -350,7 +376,7 @@ async function fishView(manifest: Manifest): Promise<(t: number) => void> {
   await show(initial);
 
   return (t) => {
-    current?.setPhase(frozenPhase ?? t);
+    animate(t);
     controls.update();
     renderer.render(scene, camera);
   };
