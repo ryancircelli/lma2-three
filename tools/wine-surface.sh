@@ -11,7 +11,7 @@
 #   LMA2_WATER (default 1)   the water surface - 0 gives a surface-free baseline
 #   LMA2_BUBLES (default 0)  bubbles       LMA2_PLANTS (default 0) plantsmoving
 #   LMA2_BG (default 1)      background    LMA2_FG (default 1)     foreground
-# Frames are grabbed in-process by tools/xgrab.py (Pillow's X11 grabber), back
+# Frames are grabbed in-process by tools/surfacegrab.py (Pillow's X11 grabber), back
 # to back unless LMA2_GAP=<s>; times.txt has each grab's timestamp. Frames
 # are named f0000.png...
 
@@ -52,7 +52,7 @@ xvfb-run -a -s "-screen 0 1024x768x24 +extension GLX -nolisten tcp" bash -c '
   wine "C:\\windows\\'"$SCR_NAME"'" /s & pid=$!
   sleep '"$delay"'
   kill -0 $pid 2>/dev/null || { echo "screensaver exited early" >&2; exit 1; }
-  python3 "'"$here"'/xgrab.py" "'"$outdir"'" '"$frames $cx $cy $cw $ch $gap"'
+  python3 "'"$here"'/surfacegrab.py" "'"$outdir"'" '"$frames $cx $cy $cw $ch $gap"'
   wineserver -k
 '
 echo "scene=$scene caustics=$caustic water=${LMA2_WATER:-1} crop=$crop: $frames frames -> $outdir"

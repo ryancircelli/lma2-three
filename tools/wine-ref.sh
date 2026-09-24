@@ -31,7 +31,34 @@ SCR_NAME="Living Marine Aquarium 2 Full.scr"
 SCR_SRC="${LMA2_SCR:-/mnt/c/Windows/$SCR_NAME}"
 APP_DIR="$PREFIX/drive_c/Program Files/Freeze.com/Living Marine Aquarium 2 Full"
 
-export WINEPREFIX="$PREFIX" WINEARCH=win32 WINEDEBUG=-all
+export WINEPREFIX="$PREFIX" WINEARCH=win32 WINEDEBUG="${LMA2_WINEDEBUG:--all}"
+# Optional overrides, for motion measurements:
+#   LMA2_SCHOOLING=0|1   the <schooling> setting (default: the install's)
+#   LMA2_CROP=WxH+X+Y    capture only this region (faster - fish tracking)
+#   LMA2_EXT=ppm         frame format (ppm writes faster than png)
+#   LMA2_GRAB=fast      grab with tools/xgrab.py (ms per frame, ppm)
+#   LMA2_SECONDS=20     with LMA2_GRAB=fast: poll for this long, keep only new
+#                        renders (each timed by its first appearance)
+#   LMA2_WINEDEBUG=fps   wined3d prints the app's frame rate to stderr
+#   LMA2_TANK="Sea Horse=2,Flame Angel=3"   stock ONLY these species (with fish=1);
+#                        a species missing from settings.xml gets a line added
+EXTRA_SED=(-e 's/x/x/')
+[ -n "${LMA2_SCHOOLING:-}" ] && EXTRA_SED+=(-e "s/<schooling value=\"[0-9]*\"/<schooling value=\"$LMA2_SCHOOLING\"/")
+#   LMA2_BARE=1          no water/bubbles/foreground/background: creatures on
+#                        flat water, rendered many times faster (see notes)
+[ -n "${LMA2_BARE:-}" ] && for _k in water plantsmoving bubles foreground background; do
+  EXTRA_SED+=(-e "s/<$_k value=\"[0-9]*\"/<$_k value=\"0\"/")
+done
+if [ -n "${LMA2_TANK:-}" ]; then
+  EXTRA_SED+=(-e 's/<fish value="[1-9][0-9]*"/<fish value="0"/g')
+  IFS=',' read -ra _entries <<< "$LMA2_TANK"
+  for _e in "${_entries[@]}"; do
+    _n="${_e%=*}" _c="${_e##*=}"
+    EXTRA_SED+=(-e "/name=\"$_n\"/d" -e "/<\/fishes>/i\\            <fish value=\"$_c\" name=\"$_n\" />")
+  done
+fi
+CROP="${LMA2_CROP:+-crop $LMA2_CROP +repage}"
+EXT="${LMA2_EXT:-png}"
 unset WAYLAND_DISPLAY  # keep Wine off WSLg entirely
 
 # Run a command on a throwaway private X server (never :0).
@@ -80,7 +107,7 @@ cmd_capture() {
       -e "s/<causticonfish value=\"[0-9]*\"/<causticonfish value=\"$caustic\"/" \
       -e 's/<sound value="[0-9]*"/<sound value="0"/' \
       -e 's/<volume value="[0-9]*"/<volume value="0"/' \
-      -e "$fishexpr" \
+      -e "$fishexpr" "${EXTRA_SED[@]}" \
       "$APP_DIR/settings.base.xml" > "$APP_DIR/settings.xml"
   out="$(realpath -m "$out")"
   mkdir -p "$(dirname "$out")"
@@ -107,23 +134,35 @@ cmd_sequence() {
       -e "s/<causticonfish value=\"[0-9]*\"/<causticonfish value=\"$caustic\"/" \
       -e 's/<sound value="[0-9]*"/<sound value="0"/' \
       -e 's/<volume value="[0-9]*"/<volume value="0"/' \
-      -e "$fishexpr" \
+      -e "$fishexpr" "${EXTRA_SED[@]}" \
       "$APP_DIR/settings.base.xml" > "$APP_DIR/settings.xml"
   outdir="$(realpath -m "$outdir")"
   mkdir -p "$outdir"
-  rm -f "$outdir"/f*.png "$outdir/times.txt"
+  rm -f "$outdir"/f*.png "$outdir"/f*.ppm "$outdir/times.txt"
+  if [ "${LMA2_GRAB:-}" = fast ]; then
+    # Xlib grabs (tools/xgrab.py): milliseconds per frame instead of ~0.7 s.
+    local grab; grab="$(dirname "$(realpath "$0")")/xgrab.py"
+    on_xvfb bash -c '
+      wine "C:\\windows\\'"$SCR_NAME"'" /s & pid=$!
+      sleep '"$delay"'
+      python3 "'"$grab"'" "'"$outdir"'" '"$frames"' '"$interval"' "'"${LMA2_CROP:-}"'" "$pid" "'"${LMA2_SECONDS:-}"'"
+      wineserver -k
+    '
+    echo "scene=$scene caustics=$caustic fish=$fish schooling=${LMA2_SCHOOLING:-install}: $frames fast frames -> $outdir"
+    return
+  fi
   on_xvfb bash -c '
     wine "C:\\windows\\'"$SCR_NAME"'" /s & pid=$!
     sleep '"$delay"'
     for i in $(seq -w 0 $(('"$frames"' - 1))); do
       kill -0 $pid 2>/dev/null || { echo "screensaver exited early" >&2; exit 1; }
       date +%s.%N >> "'"$outdir"'/times.txt"
-      import -window root "'"$outdir"'/f$i.png"
+      import -window root '"$CROP"' "'"$outdir"'/f$i.'"$EXT"'"
       sleep '"$interval"'
     done
     wineserver -k
   '
-  echo "scene=$scene caustics=$caustic fish=$fish: $frames frames -> $outdir (capture times in times.txt)"
+  echo "scene=$scene caustics=$caustic fish=$fish schooling=${LMA2_SCHOOLING:-install}: $frames frames -> $outdir (capture times in times.txt)"
 }
 
 case "${1:-}" in

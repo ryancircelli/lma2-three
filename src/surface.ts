@@ -46,9 +46,11 @@ const DROP_Y = 200; // below the scene bbox's top
  * the lighting at that moment [inferred]; it is in fact whatever state the
  * previous frame left behind (a render-state leak), so it depends on what else
  * is drawn. Measured in scene 1, frame-matched (the same caustics frame in the
- * reference and here; screenshots/rowratio.py) or as a sequence mean:
- *   caustics off, no creatures   1.00 at every row (ref/ours 1.002; per band 0.995-1.007)
- *   caustics on,  no creatures   0.50 at every row (ref/ours 0.503 with 1.0)
+ * reference and here, identified by tools/surfacemap.ts; ratios by
+ * tools/surfaceratio.py) or as a sequence mean:
+ *   caustics off, no creatures   1.00 at every row (ref/ours 1.003 over 40 frames;
+ *                                per band 1.000-1.009; pixel RMS error 1.3 of 45)
+ *   caustics on,  no creatures   0.50 at every row (ref/ours 1.008 over 40 frames)
  *   caustics off, creatures      R 0.65, G 0.61 (sequence mean, 74 frames)
  *   caustics on,  creatures      R 0.64, G 0.46 (sequence mean, 74 frames)
  * Flat across rows in every case: no dependence on the mesh normals. With
