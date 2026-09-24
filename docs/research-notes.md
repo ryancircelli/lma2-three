@@ -228,6 +228,6 @@ ImageMagick one-liners used constantly:
 - The original is TIME-based (QueryPerformanceCounter dt), so Wine's 2-12 fps
   does not slow its motion: a fish crossing a 7.6 s render stall moved the
   distance its speed predicts.
-- Motion captures: `LMA2_GRAB=fast LMA2_SECONDS=40` (tools/xgrab.py keeps only
+- Motion captures: `LMA2_GRAB=fast LMA2_SECONDS=40` (tools/xgrab-renders.py keeps only
   new renders, timed), `LMA2_BARE=1` (creatures on flat water: clean
   silhouettes), `LMA2_TANK="Name=N,..."`, `LMA2_SCHOOLING=0|1`.

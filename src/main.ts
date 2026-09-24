@@ -188,8 +188,8 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     scene.background = model.clearColor;
     scene.add(model.object);
     nearScene.add(model.near);
-    await effects.setScene(id, ASSETS, model); // --- effects
     await tank.setScene(id, ASSETS); // [feat/fish] fish bounds, sea floor, reef line
+    await effects.setScene(id, ASSETS, model); // --- effects
     fit();
     done(`scene-${id}`, `Scene ${id} · ${tank.count} creatures`);
   }
@@ -228,7 +228,9 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   // orthographic camera throughout: scene pass 0 (`back`); creatures BEHIND
   // the foreground plane (z > 0); scene pass 1 (`front`: billboards,
   // Foreground, caustics); the crab and sea star; depth cleared, creatures in
-  // FRONT of it, over everything; a sea star on the glass last (tank.ts).
+  // FRONT of it, over everything; light motes; depth cleared, a sea star on
+  // the glass last. Depth is cleared only where the original clears it:
+  // bubbles (pass 1) write depth and so hide back creatures behind them.
   const paint = (pass: 0 | 1) => {
     if (current) {
       current.back.visible = pass === 0;
@@ -247,13 +249,15 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     if (frozenT === null) tank.update(Math.min(t - last, 0.1));
     last = t;
     renderer.clear();
-    paint(0);
-    tank.renderBehind(renderer);
+    paint(0); // Z off: writes no depth
+    tank.renderBehind(renderer); // Z on
+    paint(1); // bubbles test/write depth; the rest of the painting does not
+    tank.renderFloor(renderer); // crab, sea star (floor variant)
     renderer.clearDepth();
-    paint(1);
-    // nearScene holds the light motes (effects.ts): drawn after the front
-    // creatures and before a sea star on the glass, as the original orders them.
-    tank.renderFront(renderer, () => renderer.render(nearScene, camera));
+    tank.renderFront(renderer); // front creatures
+    renderer.render(nearScene, camera); // light motes (--- effects)
+    renderer.clearDepth();
+    tank.renderGlass(renderer); // sea star on the glass
   };
 }
 

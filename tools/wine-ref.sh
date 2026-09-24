@@ -36,7 +36,7 @@ export WINEPREFIX="$PREFIX" WINEARCH=win32 WINEDEBUG="${LMA2_WINEDEBUG:--all}"
 #   LMA2_SCHOOLING=0|1   the <schooling> setting (default: the install's)
 #   LMA2_CROP=WxH+X+Y    capture only this region (faster - fish tracking)
 #   LMA2_EXT=ppm         frame format (ppm writes faster than png)
-#   LMA2_GRAB=fast      grab with tools/xgrab.py (ms per frame, ppm)
+#   LMA2_GRAB=fast      grab with tools/xgrab-renders.py (ms per frame, ppm)
 #   LMA2_SECONDS=20     with LMA2_GRAB=fast: poll for this long, keep only new
 #                        renders (each timed by its first appearance)
 #   LMA2_WINEDEBUG=fps   wined3d prints the app's frame rate to stderr
@@ -140,8 +140,8 @@ cmd_sequence() {
   mkdir -p "$outdir"
   rm -f "$outdir"/f*.png "$outdir"/f*.ppm "$outdir/times.txt"
   if [ "${LMA2_GRAB:-}" = fast ]; then
-    # Xlib grabs (tools/xgrab.py): milliseconds per frame instead of ~0.7 s.
-    local grab; grab="$(dirname "$(realpath "$0")")/xgrab.py"
+    # Xlib grabs (tools/xgrab-renders.py): milliseconds per frame instead of ~0.7 s.
+    local grab; grab="$(dirname "$(realpath "$0")")/xgrab-renders.py"
     on_xvfb bash -c '
       wine "C:\\windows\\'"$SCR_NAME"'" /s & pid=$!
       sleep '"$delay"'
