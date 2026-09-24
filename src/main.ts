@@ -18,6 +18,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { type FishEntry, type FishModel, loadFish } from "./fish.ts";
 import { loadScene, type SceneModel } from "./scene.ts";
 import { Tank } from "./tank.ts";
+import { Effects } from "./effects.ts"; // --- effects: bubbles, light rays, light motes
 
 interface Manifest {
   fish: FishEntry[];
@@ -128,11 +129,13 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     camera.updateProjectionMatrix();
     // The fish camera sees exactly this view at the painting's plane.
     tank.setView(cx, cy, hw, hh);
+    effects.setScale(renderer.getDrawingBufferSize(new THREE.Vector2()).y / (2 * hh)); // --- effects
   }
   new ResizeObserver(fit).observe(canvas);
 
   const tank = new Tank();
   const nearScene = new THREE.Scene(); // billboards in front of the fish
+  const effects = new Effects(ASSETS, params, scene, nearScene); // --- effects (see effects.ts for the layering)
   if (params.get("school") === "0") tank.schooling = false;
   renderer.autoClear = false;
 
@@ -162,6 +165,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     current = model;
     scene.add(model.object);
     nearScene.add(model.near);
+    await effects.setScene(id, ASSETS, model.object); // --- effects
     fit();
     params.set("scene", id);
     history.replaceState(null, "", `?${params}`);
@@ -191,6 +195,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   let last = 0;
   return (t) => {
     current?.update(t);
+    effects.update(t); // --- effects
     if (frozenT === null) tank.update(Math.min(t - last, 0.1));
     last = t;
     renderer.clear();
