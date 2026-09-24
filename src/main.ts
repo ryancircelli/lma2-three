@@ -21,6 +21,7 @@ import { ambience } from "./audio.ts";
 import { loadScene, nextRotationScene, type SceneModel } from "./scene.ts";
 import { Tank } from "./tank.ts";
 import { Effects } from "./effects.ts"; // --- effects: bubbles, light rays, light motes
+import { WaterSurface } from "./surface.ts"; // water surface
 
 interface Manifest {
   fish: FishEntry[];
@@ -149,6 +150,13 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   if (params.get("school") === "0") tank.schooling = false;
   renderer.autoClear = false;
 
+  // --- water surface (src/surface.ts): scene pass 0, just before the
+  // Background (added to each scene's `back` in show()). ?surface=0 hides it
+  // (baseline for comparisons).
+  const surface = await WaterSurface.load(ASSETS);
+  surface.object.visible = params.get("surface") !== "0";
+  // --- end water surface
+
   const select = document.createElement("select");
   for (const s of manifest.scenes) select.add(new Option(`Scene ${s.id}`, s.id));
   const label = document.createElement("label");
@@ -169,10 +177,13 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
       return;
     }
     if (current) {
+      surface.object.removeFromParent(); // water surface: not the old scene's to dispose
       scene.remove(current.object);
       nearScene.remove(current.near);
       current.dispose();
     }
+    await surface.setScene(id, ASSETS); // water surface
+    model.back.add(surface.object); // water surface
     current = model;
     scene.background = model.clearColor;
     scene.add(model.object);
@@ -210,6 +221,8 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     if (frozenT !== null) tank.simulateTo(frozenT);
     done(`scene-${select.value}`, `Scene ${select.value} · ${tank.count} creatures`);
   }
+  // water surface: its brightness depends on what else is drawn (surface.ts DIFFUSE)
+  surface.configure({ caustics: params.get("caustics") !== "0", creatures: tank.count > 0 });
 
   // [feat/fish] The original's draw order (docs/original-logic.md 2.2), one
   // orthographic camera throughout: scene pass 0 (`back`); creatures BEHIND
@@ -230,6 +243,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   return (t) => {
     current?.update(t);
     effects.update(t); // --- effects
+    surface.update(t); // water surface
     if (frozenT === null) tank.update(Math.min(t - last, 0.1));
     last = t;
     renderer.clear();
