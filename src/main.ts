@@ -178,6 +178,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     scene.add(model.object);
     nearScene.add(model.near);
     await effects.setScene(id, ASSETS, model); // --- effects
+    await tank.setScene(id, ASSETS); // [feat/fish] fish bounds, sea floor, reef line
     fit();
     done(`scene-${id}`, `Scene ${id} · ${tank.count} creatures`);
   }
@@ -200,7 +201,9 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   // ?fish=0 leaves the tank empty, for backdrop comparisons.
   if (params.get("fish") !== "0") {
     try {
-      await tank.populate(manifest.fish, manifest.tank, ASSETS);
+      // [feat/fish] ?all=1: one of every species (to check each one), else the configured tank.
+      const stock = params.get("all") === "1" ? Object.fromEntries(manifest.fish.map((f) => [f.slug, 1])) : manifest.tank;
+      await tank.populate(manifest.fish, stock, ASSETS);
     } catch (e) {
       fail(`fish: ${(e as Error).message}`);
     }
@@ -208,9 +211,21 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     done(`scene-${select.value}`, `Scene ${select.value} · ${tank.count} creatures`);
   }
 
-  // Three passes, because the original composites two projections: the flat
-  // painting (orthographic), the 3D creatures (perspective) in front of it, and
-  // the near billboards (orthographic again) in front of the creatures.
+  // [feat/fish] The original's draw order (docs/original-logic.md 2.2), one
+  // orthographic camera throughout: scene pass 0 (`back`); creatures BEHIND
+  // the foreground plane (z > 0); scene pass 1 (`front`: billboards,
+  // Foreground, caustics); the crab and sea star; depth cleared, creatures in
+  // FRONT of it, over everything; a sea star on the glass last (tank.ts).
+  const paint = (pass: 0 | 1) => {
+    if (current) {
+      current.back.visible = pass === 0;
+      current.front.visible = pass === 1;
+    }
+    const water = scene.background; // a colour background clears: only on pass 0
+    if (pass === 1) scene.background = null;
+    renderer.render(scene, camera);
+    scene.background = water;
+  };
   let last = 0;
   return (t) => {
     current?.update(t);
@@ -218,11 +233,13 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     if (frozenT === null) tank.update(Math.min(t - last, 0.1));
     last = t;
     renderer.clear();
-    renderer.render(scene, camera);
+    paint(0);
+    tank.renderBehind(renderer);
     renderer.clearDepth();
-    renderer.render(tank.scene, tank.camera);
-    renderer.clearDepth();
-    renderer.render(nearScene, camera);
+    paint(1);
+    // nearScene holds the light motes (effects.ts): drawn after the front
+    // creatures and before a sea star on the glass, as the original orders them.
+    tank.renderFront(renderer, () => renderer.render(nearScene, camera));
   };
 }
 

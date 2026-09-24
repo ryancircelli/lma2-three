@@ -5,7 +5,7 @@
 #   tools/wine-burst.sh OUTDIR SCENE CAUSTICS FISH BUBLES FRAMES INTERVAL X Y W H [DELAY] [WATER]
 #
 # Captures a W x H crop at (X,Y) FRAMES times, INTERVAL seconds apart, through
-# tools/xgrab.py (one persistent Xlib connection: a few ms per crop instead of
+# tools/xgrab-burst.py (one persistent Xlib connection: a few ms per crop instead of
 # ImageMagick import's ~0.5 s). BUBLES / WATER set the <bubles> / <water> scene
 # params (the app's own spelling) in the private settings copy.
 #
@@ -81,7 +81,7 @@ inner() {
       done
     ) & stallpid=$!
   fi
-  python3 "$here/xgrab.py" "$outdir" "$frames" "$interval" "$cx" "$cy" "$cw" "$ch"
+  python3 "$here/xgrab-burst.py" "$outdir" "$frames" "$interval" "$cx" "$cy" "$cw" "$ch"
   if [ -n "$stallpid" ]; then kill "$stallpid"; fi
   wineserver -k
 }

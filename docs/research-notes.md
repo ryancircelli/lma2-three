@@ -215,8 +215,19 @@ ImageMagick one-liners used constantly:
   `left/center/right` sway; crab 12-frame walk (base `full_mesh.X`).
 - Fish heads point along +X in model space after the handedness mirror.
 - Per-species `settings.xml`: `school`, `scale`, `speed`, `aggression`, `behav`.
-- Fish are drawn in **perspective** in front of the orthographic painting
-  (reference frames: distant fish tiny, near fish large, some head-on).
-  Render order: painting (ortho) -> creatures (perspective) -> near billboards (ortho).
-- **All motion constants in tank.ts are guesses marked CALIBRATE.** Nothing
-  about navigation, speed, size or schooling is in the data.
+- ~~Fish are drawn in perspective~~ - superseded: everything, fish included,
+  goes through ONE orthographic camera; near/far size and speed are faked in
+  the fish code, and fish are split per frame into a behind-the-foreground and
+  an in-front group (docs/original-logic.md 2-4, implemented in src/tank.ts).
+- Motion is the decoded model, not tuning. Checked against the original
+  (Wine, bare tank, per species, tools/track.ts vs tools/probe-ours.ts +
+  tools/motion-stats.ts): whole tank centre-y p02/50/98 7/273/712 px (ref
+  6-16/219-319/707-715), speed p50/p90 25/81 px/s (ref 12-26/60-106), width
+  p50/p90 57/113 px (ref 55-64/101-117). Fish never go below the Crab_Path
+  floor line in the reference (p95 0 px, p99 10 px over 9182 blobs).
+- The original is TIME-based (QueryPerformanceCounter dt), so Wine's 2-12 fps
+  does not slow its motion: a fish crossing a 7.6 s render stall moved the
+  distance its speed predicts.
+- Motion captures: `LMA2_GRAB=fast LMA2_SECONDS=40` (tools/xgrab.py keeps only
+  new renders, timed), `LMA2_BARE=1` (creatures on flat water: clean
+  silhouettes), `LMA2_TANK="Name=N,..."`, `LMA2_SCHOOLING=0|1`.
