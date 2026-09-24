@@ -90,6 +90,22 @@ Two meshes have no triangles and are data, not geometry: `Crab_Path` (25-35 poin
 - **Rendering** - checked in headless Chromium via [agent-browser](https://github.com/vercel-labs/agent-browser), one species per
   animation kind: page state read through `window.lma2`, then screenshots.
 
+## Deploy (private, password-protected)
+
+Every push to `main` runs `.github/workflows/deploy.yml`, which type-checks, tests, builds and stages `_site/`, then deploys it with
+wrangler to **https://lma2-three.ryancircelli.workers.dev**.
+
+- **Password gate**: `worker/index.ts` runs in front of every request (`assets.run_worker_first` in `wrangler.jsonc`), checks HTTP
+  Basic auth against the Worker secret `SITE_PASSWORD`, and returns 401 otherwise. The browser asks once; any username works. With
+  no secret set, it serves nothing (503).
+- **Where the secrets live** (none are in the repo):
+  - GitHub Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. The token is scoped to this one account, with only
+    *Workers Scripts: Edit* and *Account Settings: Read*. It is named "lma2-three deploy (GitHub Actions)" in the Cloudflare dashboard.
+  - `SITE_PASSWORD` is stored on the Worker itself (Cloudflare secret) and persists across deploys. A local copy is in `.dev.vars`,
+    which is gitignored and also used by `wrangler dev`.
+- **Change the password**: `npx wrangler secret put SITE_PASSWORD` (or in the dashboard: Workers → lma2-three → Settings →
+  Variables and Secrets), then update `.dev.vars`.
+- Without `CLOUDFLARE_API_TOKEN`, CI still builds and tests but skips the deploy.
 ## Notes
 
 - If the install's `COMMON` archive has `data.fat.bak-*` / `data.bin.bak-*` backups, `extract` uses the earliest pair, so the web
