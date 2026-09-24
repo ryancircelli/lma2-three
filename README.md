@@ -90,6 +90,35 @@ Two meshes have no triangles and are data, not geometry: `Crab_Path` (25-35 poin
 - **Rendering** - checked in headless Chromium via [agent-browser](https://github.com/vercel-labs/agent-browser), one species per
   animation kind: page state read through `window.lma2`, then screenshots.
 
+## Controls
+
+Live at **https://lma2.ryancircelli.com**. The panel (top left) has:
+
+- **Scene** - 1 to 3. With no `?scene=`, each load shows the next scene, as each launch of the original did.
+- **View** - how the original's 4:3 frame meets another window shape: **Fit** (4:3 with black bars, the default), **Fill**
+  (zoom to cover, crops top and bottom on 16:9) or **Stretch**. `?aspect=fit|fill|stretch`.
+- **Sound** - the original's one ambient loop; **M** mutes. `?sound=0`, `?volume=<dB>` (default -12).
+- **Fish (N)** - how many of each of the 19 species (0-100; crab and sea star 0-1), presets, schooling. `?tank=slug:n,...`
+- **Speed** - 0.5x to 4x playback. `?speed=`
+- **Fullscreen** - also **F** or double-click; the panel and cursor hide until the mouse moves, and the display is kept awake.
+
+Randomness: normal viewing seeds the original's MSVC `rand()` from the clock, like the original's `srand(GetTickCount())`, so
+every load is a fresh launch. `?seed=N` replays one; reference captures (`?t=`, `?clean=1`) use a fixed stream.
+
+## Fidelity
+
+The remake was compared with the original running under Wine (on a private Xvfb display) over four review rounds by an
+adversarial reviewer, using logic recovered by decompiling the original (`docs/original-logic.md`). The final verdict
+(`docs/fidelity-review.md`, round 4) is that it is as close as can reasonably be achieved or measured:
+
+- Camera registration 0.0-0.4 px; the painting agrees to Wine's noise floor (42-45 dB); water surface, bubbles and caustics
+  within a few percent; creature colours within about 10 levels.
+- Creature speeds, climb, heights, zone shares, schooling, crab and sea star match within the original's own launch-to-launch
+  spread.
+- Irreducible limits: the reference is Wine's software renderer, not a 2005 D3D6 driver; the original seeds its randomness from
+  the clock, so a launch only matches in distribution; it steps once per frame (Wine ran it at about 5 fps); and blob tracking
+  resolves schooling turn counts only to about 2x.
+
 ## Sound
 
 The original's only sound, `Sound_undwater.ogg`, loops gaplessly (Web Audio) in the tank view. Browsers allow audio only after
@@ -115,9 +144,3 @@ wrangler as Workers static assets to **https://lma2.ryancircelli.com** (also htt
 - If the install's `COMMON` archive has `data.fat.bak-*` / `data.bin.bak-*` backups, `extract` uses the earliest pair, so the web
   build gets the original audio rather than a locally patched one.
 - `settings.xml` in the install has **no BOM**, and the 2005 parser crashes if one is added. Nothing here writes to the install.
-
-## Next
-
-- The tank: layered background/foreground slices, the 29-frame caustics loop, light rays, water surface, bubbles.
-- Fish navigation and schooling, driven by each species' behaviour values.
-- Undulation layered on top of the fin poses.
