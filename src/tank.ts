@@ -32,6 +32,8 @@
 import * as THREE from "three";
 import { type FishEntry, type FishInstance, type FishModel, loadFish } from "./fish.ts";
 import { loadXDoc } from "./xloader.ts";
+import { applyCreatureCaustics } from "./caustics.ts"; // caustics hook
+import { attachCrabShadow } from "./shadow.ts"; // caustics hook (crab shadow)
 
 /** Small seedable PRNG (mulberry32), so a given ?t= always shows the same frame. */
 function rng(seed: number): () => number {
@@ -175,8 +177,6 @@ class PathWalker {
 interface Crab {
   inst: FishInstance;
   holder: THREE.Group;
-  shadow: THREE.Mesh;
-  body: THREE.Object3D;
   walk: PathWalker;
   dir: number; // +1 right, -1 left
   speed: number;
@@ -215,8 +215,6 @@ export class Tank {
   readonly behind = new THREE.Scene();
   /** Crab and sea star (drawn after the painting, before the front creatures). */
   readonly floor = new THREE.Scene();
-  /** The crab's shadow, drawn just before the crab (Z off). */
-  private underlay = new THREE.Scene();
   /** A sea star on the front glass: drawn over everything. */
   readonly glass = new THREE.Scene();
   /** The painting's orthographic camera (setView). */
@@ -338,6 +336,8 @@ export class Tank {
     let m = this.models.get(entry.slug);
     if (!m) {
       m = await loadFish(entry, assetsUrl);
+      applyCreatureCaustics(m.object, m.kind, assetsUrl); // caustics hook: caustic / causticonfish pass
+      if (m.kind === "cycle") attachCrabShadow(m.object, assetsUrl); // caustics hook: crab shadow (after caustics)
       this.models.set(entry.slug, m);
     }
     return m;
@@ -478,22 +478,13 @@ export class Tank {
     tilt.rotation.y = -Math.PI / 2; // model Z -> +x (sideways), model +X -> the viewer
     const holder = new THREE.Group();
     holder.add(tilt);
-    // Shadow: shadow.dds on a 200x200 quad in the crab's local XZ, Z off.
-    const tex = await new THREE.TextureLoader().loadAsync(assetsUrl + "common/shadow.png");
-    const shadow = new THREE.Mesh(
-      new THREE.PlaneGeometry(200, 200).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }),
-    );
-    shadow.matrixAutoUpdate = false;
-    this.underlay.add(shadow); // drawn before the body (its own pass), Z off
+    // (Its shadow quad comes with the model: src/shadow.ts, attached in model().)
     this.floor.add(holder);
     const walk = new PathWalker(this.data.walkPath);
     walk.i = Math.min(4, this.data.walkPath.length - 3); // starts at sorted point 4
     this.crabs.push({
       inst,
       holder,
-      shadow,
-      body,
       walk,
       dir: -1, // it starts moving left
       speed: 4,
@@ -544,10 +535,7 @@ export class Tank {
     const slope = Math.atan2(p.ty, p.tx);
     c.holder.position.set(p.x, p.y, -b.minZ);
     c.holder.rotation.set(0, 0, slope);
-        c.holder.updateMatrixWorld(true);
-    c.shadow.matrix.copy(c.body.matrixWorld).multiply(new THREE.Matrix4().makeTranslation(0, 3 * Math.sin(c.phase) - 10, 0));
-    c.shadow.matrixWorldNeedsUpdate = true;
-  }
+      }
 
   // --- sea star -------------------------------------------------------------------
 
@@ -907,7 +895,6 @@ export class Tank {
   /** Crab and sea star, then (Z cleared) the front creatures, then a sea star on the glass. */
   renderFront(renderer: THREE.WebGLRenderer): void {
     renderer.clearDepth();
-    renderer.render(this.underlay, this.camera);
     renderer.render(this.floor, this.camera);
     renderer.clearDepth();
     renderer.render(this.scene, this.camera);
@@ -956,7 +943,7 @@ export class Tank {
     this.fish = [];
     this.crabs = [];
     this.stars = [];
-    for (const s of [this.scene, this.behind, this.floor, this.glass, this.underlay]) {
+    for (const s of [this.scene, this.behind, this.floor, this.glass]) {
       for (const o of [...s.children]) if (!(o instanceof THREE.Light)) s.remove(o);
     }
   }
