@@ -1,5 +1,8 @@
 # Fidelity review (pessimist): the remake vs the original
 
+> **Round 2 (`main` @ 4d5476d, after feat/motion2 and feat/render2) is [at the end of this file](#round-2-main--4d5476d).**
+> Sections 1-5 are the round-1 review of 4828608. They are kept as they were, for the before/after comparison.
+
 - **Reviewed:** `main` @ 4828608. **Branch:** `review/pessimist`.
 - Every number below was measured for this review, unless marked *(other agent)*.
 - Evidence paths are relative to `.worktrees/review/screenshots/`. That folder is gitignored and stays on the machine (about 25 GB of frames).
@@ -332,3 +335,303 @@ This is the most visible difference: it changes the character of the swimming on
 - **Per-launch randomness.** The original seeds MSVC `rand()` from GetTickCount. Fish start poses, zone timers, the class-C mask phases, the star's floor/glass choice and the eye targets can only match in distribution, never frame for frame.
 - **Frame timing.** Wine renders at 3-12 fps, ours at 60 fps. The motion is time-based, so statistics agree, but per-frame integration (the position averaging and ½-pitch smoothing are per frame) makes trajectories slightly frame-rate dependent in the original itself.
 - **Rasterisation rules.** D3D6 pixel centres and fill rules versus GL are approximated by the 0.5 px nudge. One-pixel edge differences (the horizon row) can be patched case by case, but not in general.
+
+---
+
+# Round 2 (`main` @ 4d5476d)
+
+- **What changed:** feat/motion2 (a port of the creature motion code) and feat/render2 (fixed-function materials, raw origins, surface ambient, no MSAA, plant wrap and mask phase, a caustic clock per fish, crab shadow bob) were merged.
+- **How it was checked:** everything was re-measured with the round-1 pipelines. The fix agents' own numbers were not trusted.
+
+## R2.0 What was run
+
+**Static stills (ours)**
+- Re-shot at 1024x768: `r2/oP*`, `r2/oC*`, `r2/oW*`.
+- Compared against the same round-1 Wine stills.
+
+**Headless motion (ours)**
+- `tools/probe-ours.ts` on the new `src/tank.ts`, with the round-1 24-fish tank.
+- 3 scenes × 4 seeds × 300 s.
+- Three simulation frame lengths: 1/30 s, 1/6 s (roughly Wine's rate) and 1/60 s. `probe-ours.ts` gained `--step` for this.
+
+**Rendered runs, same pipeline (ours)**
+- The browser with the new `?bare=1&tank=…` switches.
+- Each run goes through `tools/track.ts`, exactly like the reference:
+  - bare 24-fish tank, 3 scenes, 300 frames each (`r2/bare{s}`, `r2/win/bare{s}`);
+  - full default tank, 200 frames each (`r2/win/full{s}`).
+- The Wine references were subsampled to the same ~1.7 fps (`r2/refsub{s}`).
+
+**New Wine captures** (at most two at a time, as asked)
+- 180 s single-species runs for the 8 species the installed tank never stocks. Scene 1, bare, 4 fish; 3 for the sea horse. Output in `r2/sp/<slug>`.
+  - Species: convict tang, flame angel, juvenile angel, purple tang, raccoon butterfly, sea horse, yellow tang, powder brown tang.
+- A crab plus sea star run, `r2/ref/crab`. Its positions are usable. Its timestamps were broken by the WSL crash, so no speeds come from it.
+
+**Per-species headless (ours)**
+- All 19 species, 4 seeds × 180 s, in the same set-up as the references (`r2/sp-ours`).
+
+**New tools**
+- `tools/trimmean.ts`: robust time average of a region, trimming out passing fish.
+- `tools/fishcolour.ts`: creature colour distribution on bare frames.
+
+## R2.1 Before / after / reference
+
+"R1" is round 1 (4828608) and "R2" is now (4d5476d). Reference values come from the same Wine data as round 1 unless noted.
+
+| Feature | R1 (ours) | R2 (ours) | Reference | R2 verdict |
+|---|---|---|---|---|
+| Registration (all regions, 3 scenes) | 0.0-0.4 px | 0.0-0.4 px | - | MATCHES |
+| Painting outside billboards, PSNR | 44.4 / 42.6 / 42.3 dB | 44.6 / 42.9 / 42.5 dB | - | MATCHES (noise floor) |
+| Relief caustics, added light ours/ref | 0.965 / 0.914 / 1.024 | 0.966 / 0.915 / 1.025 | 1 | CLOSE (scene 2 8.5 % dim) |
+| Surface, no fish, added ours/ref | 0.978 / 0.984 / 1.035 | 0.978 / 0.984 / 1.035 | 1 | MATCHES |
+| Surface horizon row 127 (R+G) | +5.4 / +4.3 | **0 / 0** | 0 / 0 | **CLOSED** (MSAA off) |
+| Surface with fish + caustics, scene 1, trimmed-mean R / G over open water | fixed 0.64/0.46 tint | **16.0 / 152.4** | 15.9 / 152.8 | **CLOSED** (≈ 0x80 ambient, as D4 predicted) |
+| same, scene 3 | - | 16.6 / 122.2 | 17.6 / 122.7 | **CLOSED** |
+| Whole-tank speed p50/p90 px/s (headless 1/30 s) | 27/81, 29/76, 28/80 | 32/81, 32/80, 33/81 | 31/86, 30/83, 30/80 | MATCHES |
+| Whole-tank \|vy/vx\| p50 | 0.32 / 0.34 / 0.36 | **0.44 / 0.43 / 0.52** | 0.43 / 0.43 / 0.53 | **CLOSED** |
+| Whole-tank turns per track-minute (headless) | 4.8 / 4.1 / 4.6 | 4.2 / 3.6 / 3.9 | 3.7 / 2.4 / 2.9 | CLOSE, 1.1-1.5× (see R2.3) |
+| same, same-pipeline rendered vs subsampled ref | - | 2.5 / 3.7 / 3.9 | 3.4 / 2.4 / 2.5 | CLOSE, mean 3.4 vs 2.8 = 1.2× |
+| Centre-y p50/p98 (headless) | 214/684, 182/676, 177/590 | 234/690, 209/679, 187/669 | 246/689, 196/680, 221/676 | CLOSE (s3 p98 fixed; s3 p50 still 34 px high) |
+| Lowest fish per frame p50, scene 3 | 470-579 | 610 (pooled) | 684 | better, still high |
+| Fish in front of the reef: % of moving detections below the reef line (>150 px below) | 47 (33) / 44 (11) / 35 (10) | **63 (48) / 64 (40) / 44 (19)** | 56 (39) / 63 (40) / 49 (27) | CLOSE (s2 matches; s1 now 7-9 pts over; s3 5-8 pts under) |
+| Floor contact: % time centre below floor | 4.1 / 1.8 / 0.2 | 5.0 / 3.3 / 0.8 | 5.7 / 5.8 / 2.3 | CLOSE |
+| Never below the screen bottom | yes | yes (max box bottom 745-752) | yes (max 724-760) | MATCHES |
+| Crab still-fraction / \|vx\| p90 | 0.32-0.44 / 26 | 0.36-0.50 / 25-26 | 0.44 / 25 | **MATCHES** |
+| Crab bottom edge by x (8 bins, x 80-640) | - | within -4..+4 px of ref; 0-1 px at x 480-640 | - | MATCHES: the "6 px low at the right end" is **not reproduced** |
+| Sea star glass / floor screen centre y | - | 647 / 709 | 653 / ≈707 | MATCHES |
+| Sea horse centre-y p02/50/98 (scene 1) | 27/238/625 | 24/348/619 | 42/345/563 (180 s run) | CLOSE (see R2.3) |
+| Yellow tang colour, B mean on bare frames | - | 30.0 | 43.3 (180 s), 46.6 (40 s) | **OFF**, cause found (R2.3 #1) |
+
+**Code checks against the decompile** (my own reads, added to the round-1 audit):
+- **Fish update 0x415150: ported as read.**
+  - The follower re-aim runs on the step clock (`f.reaim -= step`).
+  - The re-aim threshold is π/6. The turn applies only inside the zone and when \|target\| > 0.3.
+  - Gating is applied per frame.
+  - Pitch smoothing comes after the leader and zone nudges, and the inertia term is present.
+  - The reef hold and the avoidance push come after the move, at full strength.
+- **Sea horse: matches the decompile.**
+  - The navigator is the 0x4189b0 / 0x417e40 waypoint spline.
+  - Its constants match the binary (`rd.py`): 150, 75, 0.6 flip height, 0.1 floor, 0.7 climb cut, ±30° turn-back.
+  - Re-stamping the mood with the sway phase (+0x68) is what 0x41fa30 does, so it is not a remake bug. My round-1 note flagged the old `this.t` stamp as a bug, which it was. The fix now follows the original, including its quirk.
+- **Crab turn: matches 0x409d00.** A forced mood 2 for 4 s, flip the direction when it expires, restart from standstill.
+- **Sea star: matches.** Starts at P1 heading −x; the spin follows the direction of travel.
+- **Surface ambient:** set per frame from `Tank.ambientLeft()`. The measured result is in the table above.
+- **Also present as described in the code:**
+  - plant texture wrap;
+  - per-plant mask phase;
+  - crab shadow bob;
+  - per-fish caustic clock;
+  - `view=fish` per-part animation.
+
+## R2.2 Per-species motion (all 19)
+
+**Reference.** Wine, scene 1, bare tank, 4 of the species (3 sea horses; 1 crab or star).
+- **ref180:** this round's 180 s runs.
+- **ref40:** the fish agent's 40 s runs.
+
+**Ours.** Headless, 4 seeds × 180 s, same stock.
+
+Each cell lists: speed p50/p90 px/s · \|vy/vx\| p50 · turns per track-minute · centre-y p02/p50/p98 · width p50/p90.
+
+| Species | school | ref | Reference | Ours | Flag |
+|---|---|---|---|---|---|
+| bicolor angel | 1 | 40 s | 26/75 · 0.37 · 0.0 · 345/665/695 · 34/80 | 28/70 · 0.44 · 4.4 · 6/194/674 · 39/78 | ref too short |
+| blue hippo tang | 1 | 40 s | 55/83 · 0.26 · 3.6 · 224/467/694 · 86/117 | 27/68 · 0.40 · 4.1 · 5/167/574 · 53/102 | ref too short (one school, near zone) |
+| clown trigger | 0 | 40 s | 54/140 · 0.25 · 1.3 · 21/444/711 · 92/144 | 24/95 · 0.27 · 4.1 · 6/221/689 · 63/122 | ref too short; turns? |
+| **convict tang** | 1 | 180 s | 30/82 · 0.41 · 3.1 · 5/158/636 · 44/101 | 31/72 · 0.40 · 4.4 · 8/206/675 · 45/93 | turns 1.4× |
+| cuban hog | 1 | 40 s | 24/35 · 0.47 · 0.4 · 21/250/465 · 43/67 | 28/73 · 0.43 · 3.9 · 6/199/671 · 39/90 | ref too short (far zone only) |
+| **flame angel** | 0 | 180 s | 11/60 · 0.23 · 1.8 · 4/323/695 · 24/58 | 9/43 · 0.30 · 1.7 · 5/245/674 · 23/45 | **p90 speed -28 %** |
+| **juvenile angel** | 0 | 180 s | 12/53 · 0.21 · 1.1 · 7/155/696 · 44/88 | 12/45 · 0.30 · 2.0 · 5/184/678 · 46/88 | turns 1.8× (low counts) |
+| majestic angel | 0 | 40 s | 9/52 · 0.15 · 0.0 · 56/329/541 · 64/111 | 10/39 · 0.30 · 1.5 · 3/185/677 · 55/84 | ref too short |
+| moorish idol | 1 | 40 s | 38/84 · 0.44 · 2.1 · 8/317/631 · 55/86 | 26/65 · 0.40 · 3.3 · 5/202/583 · 31/71 | ref too short |
+| percula clown | 1 | 40 s | 33/56 · 0.65 · 0.0 · 3/204/364 · 25/32 | 35/105 · 0.37 · 6.0 · 5/246/686 · 33/62 | **turns 6.0/min, the highest**; ref too short to confirm |
+| **powder brown tang** | 1 | 180 s | 37/80 · 0.38 · 3.8 · 5/218/679 · 51/92 | 34/76 · 0.41 · 4.6 · 8/234/669 · 57/91 | MATCHES (turns 1.2×) |
+| **purple tang** | 0 | 180 s | 14/64 · 0.27 · 1.8 · 4/313/691 · 40/88 | 10/42 · 0.27 · 1.7 · 5/232/674 · 37/74 | **p90 speed -34 %** |
+| **raccoon butterfly** | 1 | 180 s | 22/57 · 0.34 · 2.2 · 3/158/688 · 22/56 | 21/61 · 0.42 · 3.0 · 6/178/545 · 26/57 | turns 1.4×; y p98 545 vs 688 |
+| regal angel | 0 | 40 s | 9/37 · 0.52 · 0.0 · 5/246/478 · 66/105 | 11/41 · 0.31 · 1.8 · 6/190/675 · 53/105 | ref too short |
+| yellow angel | 1 | 40 s | 33/67 · 0.91 · 4.1 · 7/373/692 · 24/68 | 28/71 · 0.40 · 3.8 · 5/227/683 · 36/72 | ref too short |
+| **yellow tang** | 1 | 180 s | 29/73 · 0.46 · 1.9 · 4/190/630 · 38/85 | 30/73 · 0.40 · 4.4 · 8/248/683 · 42/86 | **turns 2.3×** |
+| **sea horse** | - | 180 s | 16/28 · 0.14 · 0.7 · 42/345/563 · 37/57 | 17/39 · 0.10 · 1.0 · 24/348/619 · 32/48 | CLOSE |
+| anemone crab | - | 90 s | 2/26 · 0.10 · 1.3 · 701/710/728 · 98/103 | 4/26 · 0.09 · 1.7 · 698/708/725 · 107/108 (probe box) | MATCHES |
+| sea star | - | 90 s | 1/2 · - · 0 · 650/653/657 · 97/101 (glass) | 2/2 · - · 0 · 642/704/716 · 99/100 (floor + glass seeds mixed) | MATCHES per variant |
+
+**40 s references are too thin to judge.** The same species measured twice disagrees with itself:
+- convict tang p90: 42 (40 s) vs 82 (180 s);
+- yellow tang p90: 38 vs 73;
+- raccoon butterfly y p50: 545 vs 158.
+
+A school stays in one zone for tens of seconds, so a 40 s run samples one zone. Only the 180 s rows, and the pooled multi-species runs, are good enough for a verdict.
+
+**Turn-arounds split cleanly by schooling.**
+- Solo species (school = 0) match: flame angel 1.7 vs 1.8, purple tang 1.7 vs 1.8. Juvenile angel is 2.0 vs 1.1, but on very few events.
+- Schooling followers turn too often:
+  - yellow tang 2.3×;
+  - convict tang 1.4×;
+  - raccoon butterfly 1.4×;
+  - powder brown tang 1.2×;
+  - percula clown: 6.0/min in ours, the highest of any species.
+
+**Top speed of slow solo species is low.** Flame angel and purple tang p90 are 43 / 42 in ours against 60 / 64.
+
+**Frame rate is not the cause.** Wine runs at about 5 fps, and the original updates per frame, so I re-ran ours at 6, 30 and 60 fps (`r2/fps`):
+- yellow tang turns: 4.6 / 4.1 / 3.8;
+- flame angel p90: 44 / 45 / 44.
+
+Neither residual comes from Wine's low frame rate.
+
+## R2.3 Ranked residuals after round 2
+
+### 1. Fish are drawn double-sided; the original culls back faces
+
+This is visible on every fish in every frame.
+
+**Evidence**
+- `fixedfunction.ts` keeps the loader's `side: DoubleSide`.
+- Every swimming-fish mesh is modelled double-sided: every material group has equal +z and −z facing triangle counts. Yellow tang: 401/401 on the body, 26/26 per fin.
+- The original never sets `D3DRENDERSTATE_CULLMODE` to NONE. The only CULLMODE write in the binary is `CCW`, in the mote draw at 0x407724, and CCW is D3D's default.
+- So ours draws the inner twin as well, blended with and z-fighting the outer one.
+
+**Measured** (B channel on bare yellow-tang frames):
+
+| Render | B mean | B p75 |
+|---|---|---|
+| Ours, double-sided | 30.0 | 44 |
+| Ours, same frames, rebuilt with `side: FrontSide` | 44.1 | 76 |
+| Reference | 43.3-46.6 | 68-77 |
+
+- This is the fix agent's open item "yellow tang about 10 levels less blue".
+- The FrontSide test was a local build in `/tmp`; it is not pushed.
+- **Caveat:** ours `?bare=1` keeps the fish depth fog, while the original's bare mode (foreground = 0) turns fish fog off. Far-zone fish in ours bare frames are therefore fogged.
+  - That does not affect the FrontSide vs DoubleSide delta above: both were measured on identical frames.
+
+**Fix.** In `fixedFunctionMaterial`, set `side: THREE.FrontSide` for FISH, HORSE and FLOOR.
+- In the test, the Z mirror did not invert the culling.
+- Check the crab and sea star meshes for the same twin faces.
+
+**Closable:** yes.
+
+### 2. Schooling followers still turn around 1.2-2.3× too often
+
+Solo species match.
+
+**Measured** (turn-arounds per track-minute)
+
+| Case | Ours | Reference |
+|---|---|---|
+| Whole tank, headless | 3.6-4.2 | 2.4-3.7 |
+| Same-pipeline rendered, mean | 3.4 | 2.8 |
+| Yellow tang | 4.4 | 1.9 |
+| Percula clown | 6.0 | - |
+
+**Likely cause.**
+- The excess is confined to the follower path of `updateFish` (the `if (L)` block, leadTurn and gate), or to avoidance inside a school.
+- The solo navigator path matches, so the zone-turn logic is not the cause.
+
+**Candidates to check against 0x415150:**
+- the sign convention of `signedAngle` against which gate (`gateR` / `gateL`) turns which way. A wrong pairing turns the fish away, and it then re-aims 180° later;
+- whether `leadTurn` is cleared when the fish leaves the zone;
+- the avoidance radius inside a tight school. The aggression comparison makes every same-species neighbour an obstacle at R = 3.2·scale·radius.
+
+**Fix.** Instrument one follower (yaw against leader bearing over 60 s) and compare with the decompiled branch structure.
+
+**Closable:** yes, deterministic code.
+
+### 3. Slow solo species top out low: p90 speed 28-34 % under
+
+- Flame angel 43 vs 60; purple tang 42 vs 64.
+- Juvenile angel (45 vs 53) and majestic angel (39 vs 52) point the same way, but their references are thin.
+- The p50 matches (9-12 vs 11-14).
+- So either the burst state (sa → 15) or the near-zone share (zf factor 0.5-1.5) is under-represented for solo fish.
+
+**Candidates:**
+- the solo fish's first mood duration: uninitialised in the original, treated as 0 here;
+- the start of the zone-flip timer (`rand%120+10`, 10-130 s). That is long against a 180 s run, so the near/far split per run is noisy.
+
+**Fix.** A 600 s multi-launch reference for one solo species would decide whether this is real.
+
+**Closable:** partially; it needs more reference time first.
+
+### 4. Front-of-reef share off by 5-9 points in scenes 1 and 3
+
+| Scene | Below reef line, ours (deep) | Reference (deep) |
+|---|---|---|
+| 1 | 63 % (48 %) | 56 % (39 %) |
+| 2 | matches | matches |
+| 3 | 44 % (19 %) | 49 % (27 %) |
+
+- In scene 3 the centre-y p50 is still 187-209 against 221.
+- In scene 3 the lowest fish per frame has p50 610 against 684.
+- Probably coupled to #2 (school behaviour near the reef line) and to the per-launch zone timers (10-130 s).
+
+**Closable:** partially. It is statistical and needs longer runs on both sides.
+
+### 5. Sea horse
+
+- Height band: ours 24/348/619 vs 42/345/563. Turns: 1.0 vs 0.7 per minute.
+- Seed-to-seed spread in ours is large: p50 178-490 over 12 seeds × 60 s.
+- The original also differs from launch to launch: 250 (40 s run) vs 345 (180 s run).
+- Remaining gaps:
+  - the navigator's first-frame state, which the original leaves uninitialised (turnBack, counters, sway phase);
+  - the sea horse's caustic clock (ours uses the scene clock; the original's own field is [unknown]).
+
+**Closable:** partially. The distribution is right; per-launch randomness cannot be matched frame for frame.
+
+### 6. Scene-2 Relief caustics 8.5 % dim
+
+- Unchanged since round 1, and within the Wine/Mesa rounding band.
+
+**Closable:** partially; closing it would mean tuning toward Wine.
+
+### 7. `?bare=1` differs from the original's `LMA2_BARE`
+
+- The original's bare mode sets foreground = 0, which also turns the fish depth fog off (§3.11) and removes pass 1.
+- Ours keeps the fog, so bare-mode colour comparisons of far fish are biased toward blue.
+- This is a measurement-tooling issue, not a fidelity one.
+
+**Fix.** Make `bare=1` also disable fish fog.
+
+### Closed since round 1
+
+- climb/dive
+- screen-bottom behaviour
+- surface with fish
+- horizon row
+- MSAA
+- crab turn, crab height and crab width (the width was a probe artefact)
+- sea star start, spin and variants
+- sea horse speed-freeze bug and its gross height error
+- raw origins
+- plant wrap
+- mask phase
+- crab shadow bob
+- `view=fish`
+- `wine-ref.sh` volume (rays)
+- scenes 2 and 3 now have fish references
+
+### Not re-measured (code unchanged)
+
+- Bubbles, light rays and motes. Their round-1 verdicts stand.
+
+## R2.4 Verdict
+
+**Close, but not yet "as close as reasonably possible".**
+
+**The static picture is done.** It has been at the Wine/WebGL noise floor since round 1, and round 2 closed its last two items:
+- the horizon row;
+- the surface brightness with fish, now within 1 level in R and G.
+
+**Motion moved from "structurally wrong" to "statistically close".**
+- Climb and speed match.
+- The height and in-front shares are within a few points.
+- The crab and sea star match.
+
+**Top items that would still move it, in order:**
+1. `side: FrontSide` on creature materials. One line, visible on every fish. Closable.
+2. Follower turn rate, 1.2-2.3× too high in schools and fine for solo fish. Closable; the cause is in the follower branch.
+3. Top speed of slow solo species (p90 −30 %). Probably closable; confirm with a longer reference first.
+4. In-front and height shares in scenes 1 and 3 (5-9 points). Partially closable; may follow from #2.
+5. `?bare=1` should also drop fish fog, so bare comparisons are fair. Tooling.
+
+**Irreducible limits** (unchanged from round 1):
+- **Wine's software GL is the reference, not a 2005 driver.** That caps the painting at 42-45 dB and the caustic levels at ±9 %.
+- **The original seeds `rand()` per launch.** Zone timers (10-130 s), school membership, sea horse spawn, the star variant and the mask phases can match only in distribution. That is also why a single reference run under about 3 minutes cannot rank a species.
+- **The original integrates per frame.** Tested from 6 to 60 fps: turn rates change by about 20 %, speeds by less than 5 %.
