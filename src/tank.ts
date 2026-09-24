@@ -128,6 +128,7 @@ interface Fish {
   size: number;
   front: boolean;
   // sea horse only
+  clock: number;
   swayPhase: number;
   sway: { w: number[]; left: number; right: number } | null;
 }
@@ -196,13 +197,15 @@ interface Star {
   arms: { mesh: THREE.Mesh; base: Float32Array; arms: { verts: number[]; axis: THREE.Vector3; diag2: number }[] } | null;
 }
 
+/** CALIBRATE: world units a sea horse moves per unit of its navigator step (6k).
+ * Measured drift 15-37 px/s (26-63 units/s) with 6k/dt = 0.24..0.6 per s. */
+const HORSE_GAIN = 105;
+
 /** Scene clear colours (docs/original-logic.md 2.3): the sea horse's fog colour. */
 const WATER: Record<string, number> = { "1": 0x008aff, "2": 0x00cbfd, "3": 0x036ed6 };
 
-// CALIBRATE: the crab walk phase. The decoded rule is phase += 2.5*dt*speed*0.5
-// with the shadow bobbing by sin(phase); taken here as radians (one 12-frame
-// stride per 2 pi). Not measurable at Wine's 2-5 fps.
-const CRAB_PHASE_PER_CYCLE = 2 * Math.PI;
+/** The crab's walk phase counts pose FRAMES: pose int(phase)%12+1 blended into the next. */
+const CRAB_FRAMES = 12;
 
 export class Tank {
   /** Creatures in FRONT of the foreground painting (drawn last). */
@@ -219,7 +222,7 @@ export class Tank {
   private crabs: Crab[] = [];
   private stars: Star[] = [];
   private models = new Map<string, FishModel>();
-  private random = rng(20260923);
+  private random: () => number;
   private data: SceneData | null = null;
   private sceneId: string | null = null;
   private t = 0;
@@ -228,10 +231,11 @@ export class Tank {
    * foreground plane (z = 0) to z = 2 * bbox.max.z. (View depth = 10000 + z.) */
   private fog = new THREE.Fog(0x008aff, 10000, 12000);
   schooling = true;
+  /** Mesh animation on (off only for headless measurement: tools/probe-ours.ts). */
+  animate = true;
 
-  constructor() {
-    // Measurement hook: tools/motion-stats.ts drives probe() from the page.
-    (globalThis as { lma2tank?: Tank }).lma2tank = this;
+  constructor(seed = 20260923) {
+    this.random = rng(seed);
     // Lighting, from the original (docs/original-logic.md 2.4): fish get light
     // L2 (direction (0,-1,0.2)) at full strength over a 0.667 ambient; the crab
     // and sea star L1 (straight down) over a 0.5 ambient. D3D lights in gamma
@@ -307,7 +311,7 @@ export class Tank {
     const W = bbox.maxX - bbox.minX;
     for (const c of this.crabs) {
       c.walk = new PathWalker(this.data.walkPath);
-      c.walk.seek(bbox.minX + 0.35 * W);
+      c.walk.i = Math.min(4, this.data.walkPath.length - 3);
     }
     for (const st of this.stars) {
       st.walk = new PathWalker(this.data.walkPath);
@@ -388,7 +392,7 @@ export class Tank {
       isLeader,
       leader,
       timeOffset: (this.rand() % 100) * 0.1,
-      sa: 2,
+      sa: horse ? 1 : 2,
       sm: { state: this.rand() % 3, start: 0, duration: 4 },
       mode: (this.rand() & 1) as 0 | 1,
       modeTimer: 0,
@@ -406,6 +410,7 @@ export class Tank {
       ph: 0,
       size: 1,
       front: true,
+      clock: 0,
       swayPhase: 0,
       sway: null,
     };
@@ -472,7 +477,7 @@ export class Tank {
     body.add(shadow);
     this.floor.add(holder);
     const walk = new PathWalker(this.data.walkPath);
-    walk.seek(this.data.bbox.minX + 0.35 * (this.data.bbox.maxX - this.data.bbox.minX));
+    walk.i = Math.min(4, this.data.walkPath.length - 3); // starts at sorted point 4
     this.crabs.push({
       inst,
       holder,
@@ -480,7 +485,7 @@ export class Tank {
       walk,
       dir: -1, // it starts moving left
       speed: 4,
-      sm: { mode: 0, start: this.t, duration: this.rand() % 2 + 2, from: 4 },
+      sm: { mode: 0, start: this.t, duration: 0, from: 4 }, // first duration: uninitialised in the original [unknown] - expires at once
       turning: -1,
       turnTimer: this.rand() % 100,
       phase: 0,
@@ -521,7 +526,7 @@ export class Tank {
       c.walk.advance(c.dir * dt * v * 0.5);
       c.phase += c.dir * 2.5 * dt * v * 0.5;
     }
-    c.inst.setPhase(c.phase / CRAB_PHASE_PER_CYCLE);
+    c.inst.setPhase(c.phase / CRAB_FRAMES);
     const p = c.walk.sample();
     // .X: local Z along the tangent (tilted with the floor), RotZ(-pi/10)
     const slope = Math.atan2(p.ty, p.tx);
@@ -607,35 +612,30 @@ export class Tank {
     s.yaw += s.spinDir * 0.025 * dt;
     s.spin.rotation.y = s.yaw;
     s.holder.position.set(p.x, p.y + (s.glass ? 100 : 0), -b.minZ);
-    // arms curl: s = sin(0.2 t + i pi/4); lift |5 s|, twist 0.5 s,
-    // weighted by w = max(0, |v|^2/reach^2 - 0.4)
-    if (!s.arms) return;
+    // arms curl: s = sin(0.2 t + i pi/4); lifted by w|5s|, turned about Y by
+    // w*0.5s, with w = max(0, |v|^2/diag^2 - 0.4) (diag: taken as the arm's reach [inferred])
+    if (!s.arms || !this.animate) return;
     const attr = s.arms.mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
     const P = attr.array as Float32Array, B = s.arms.base;
     P.set(B);
     s.arms.arms.forEach((a, i) => {
-      const sn = Math.sin(0.2 * t + i * Math.PI / 4), lift = Math.abs(5 * sn), tw = 0.5 * sn;
+      const sn = Math.sin(0.2 * t + i * Math.PI / 4), lift = Math.abs(5 * sn);
       for (const v of a.verts) {
         const x = B[v * 3], y = B[v * 3 + 1], z = B[v * 3 + 2];
         const w = Math.max(0, (x * x + y * y + z * z) / a.diag2 - 0.4);
         if (!w) continue;
-        // twist about the arm's own radial axis, then lift
-        const along = x * a.axis.x + z * a.axis.z;
-        const px = x - along * a.axis.x, pz = z - along * a.axis.z; // across the arm
-        const ang = tw * w, c = Math.cos(ang), sa = Math.sin(ang);
-        const acrossLen = px * -a.axis.z + pz * a.axis.x; // signed, horizontal
-        const ny = y * c + acrossLen * sa, nAcross = -y * sa + acrossLen * c;
-        P[v * 3] = along * a.axis.x + nAcross * -a.axis.z;
-        P[v * 3 + 1] = ny + lift * w;
-        P[v * 3 + 2] = along * a.axis.z + nAcross * a.axis.x;
+        const ang = w * 0.5 * sn, c = Math.cos(ang), si = Math.sin(ang); // about the star's Y
+        P[v * 3] = x * c + z * si;
+        P[v * 3 + 1] = y + w * lift;
+        P[v * 3 + 2] = -x * si + z * c;
       }
     });
     attr.needsUpdate = true;
   }
   // --- simulation ---------------------------------------------------------------
 
-  private speedMachine(f: Fish): void {
-    const sm = f.sm, t = this.t;
+  private speedMachine(f: Fish, t: number): void {
+    const sm = f.sm;
     if (t - sm.start >= sm.duration) {
       sm.state = this.rand() % 3;
       sm.start = t;
@@ -693,9 +693,19 @@ export class Tank {
   private updateFish(f: Fish, dt: number): void {
     const d = this.data!, b = d.bounds, t = this.t;
     const tt = t + f.timeOffset;
-    this.speedMachine(f);
-    if (f.kind === "horse") f.sa = Math.min(f.sa, 15);
-    const step = (f.sa + 2) * f.speed * dt / 150;
+    let step: number;
+    if (f.kind === "horse") {
+      // CSeaHorse: k = dt/(25-P); the navigator steps 6k, the horse's own clock
+      // (which drives its mood timer) 2k, the sway phase k.
+      const k = dt / (25 - f.sa);
+      f.clock += 2 * k;
+      this.speedMachine(f, f.clock);
+      step = 6 * k;
+      f.swayPhase += k;
+    } else {
+      this.speedMachine(f, t);
+      step = (f.sa + 2) * f.speed * dt / 150;
+    }
     const pitchPrev = f.pitch;
 
     // zone mode: unled fish flip on a timer; followers copy their leader
@@ -761,6 +771,12 @@ export class Tank {
       if (!f.leader) f.turnTarget = 0;
     }
 
+    // pitch lock: in the bottom quarter of the bounds, or climbing over the reef
+    const lim = 0.25 * (b.maxZ - b.minZ);
+    const climbing = Math.abs(p.z) < lim && p.y < this.reefLine(p.x, p.z, zone);
+    const locked = p.y < b.minY + 0.25 * (b.maxY - b.minY) || climbing;
+    if (!locked && f.pitch > 0.7) f.pitch -= step;
+
     // avoidance: burst away along the recent average push
     const corr = p.clone();
     if (f.avoid && f.avoidRing.length) {
@@ -769,9 +785,9 @@ export class Tank {
       for (const v of f.avoidRing) dir.add(v);
       dir.divideScalar(f.avoidRing.length);
       corr.addScaledVector(dir, step * 1500);
-      const e = 3 * step * ease(Math.min(Math.abs(dir.y) * 4, 1));
-      if (dir.y > 0 && f.pitch < 0.6) f.pitch += e;
-      if (dir.y < 0 && f.pitch > -0.6) f.pitch -= e;
+      const e = 3 * step * ease(Math.min(Math.abs(dir.y) * 4, 1)); // (ease argument [inferred])
+      if (!locked && dir.y > 0 && f.pitch < 0.6) f.pitch += e;
+      if (!locked && dir.y < 0 && f.pitch > -0.6) f.pitch -= e;
       if (dir.x * dir.x + dir.z * dir.z > 1e-6) {
         f.turnTarget = wrapAngle(Math.atan2(-dir.z, dir.x) - f.yaw);
         f.turnStart = Math.min(f.turnStart, t - 1);
@@ -787,8 +803,7 @@ export class Tank {
     }
 
     // the foreground plane: pass it only above the reef line
-    const lim = 0.25 * (b.maxZ - b.minZ);
-    if (Math.abs(p.z) < lim && p.y < this.reefLine(p.x, p.z, zone)) {
+    if (climbing) {
       f.pitch = Math.min(f.pitch + 7 * step, 0.9);
       if (f.front) corr.z = Math.min(corr.z, -100);
       else corr.z = Math.max(corr.z, 100);
@@ -802,14 +817,15 @@ export class Tank {
     const zf = (b.maxZ - p.z) / (b.maxZ - b.minZ);
     const A = (f.sa + 2) / 17;
     const horse = f.kind === "horse";
-    // Sea horse sway (CSeaHorse): phase += dt/(25-P), a = 12 phase; the body
-    // yaws by cos(a)/3 - pi/2 and blends centre->left (sin a < 0) or ->right.
-    if (horse) f.swayPhase += dt / (25 - f.sa);
+    // Sea horse sway: a = 12 phase; the body yaws by cos(a)/3 - pi/2 and
+    // blends centre->left (sin a < 0) or ->right.
     const a = 12 * f.swayPhase;
     const wobYaw = horse ? Math.cos(a) / 3 - Math.PI / 2 : A * Math.sin(5 * tt) / 6;
     const wobPit = horse ? 0 : -A * Math.cos(2 * tt) / 6;
     const yaw = f.yaw + wobYaw, pitch = f.pitch + wobPit;
-    const dx = (zf + 0.5) * step * 1000;
+    // Sea horse: CALIBRATE - how the navigator turns its 6k step into distance
+    // is not recovered; HORSE_GAIN is fitted to its measured drift (see top).
+    const dx = horse ? step * HORSE_GAIN : (zf + 0.5) * step * 1000;
     // (the horse moves along its heading, not along its swayed body)
     p.addScaledVector(this.heading(f, new THREE.Vector3(), pitch, horse ? f.yaw : yaw), dx);
     f.size = horse ? 0.6 + 0.4 * zf : f.scale * 0.8 + 0.4 * zf;
@@ -829,6 +845,7 @@ export class Tank {
     f.holder.matrixWorldNeedsUpdate = true;
     const target = f.front ? this.scene : this.behind;
     if (f.holder.parent !== target) target.add(f.holder);
+    if (!this.animate) return;
     if (f.inst.swim) f.inst.swim({ tt, ph: f.ph, sa: f.sa, speed: f.speed });
     else if (f.sway) {
       const sn = Math.sin(a);
