@@ -1304,6 +1304,18 @@ export class Tank {
     return this.fish.filter((f) => f.holder).length + this.crabs.length + this.stars.length;
   }
 
+  /** Replace every creature (the fish picker). Loaded models stay cached. */
+  async restock(fish: FishEntry[], tank: Record<string, number>, assetsUrl: string): Promise<void> {
+    this.fish = [];
+    this.roster = [];
+    this.crabs = [];
+    this.stars = [];
+    for (const s of [this.scene, this.behind, this.floor, this.glass]) {
+      for (const o of [...s.children]) if (!(o instanceof THREE.Light)) s.remove(o);
+    }
+    await this.populate(fish, tank, assetsUrl);
+  }
+
   dispose(): void {
     for (const m of this.models.values()) m.dispose();
     this.models.clear();

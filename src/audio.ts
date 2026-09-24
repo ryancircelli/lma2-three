@@ -66,6 +66,7 @@ export function ambience(url: string, params: URLSearchParams, panel: HTMLElemen
     else void unlock();
   });
   addEventListener("keydown", (e) => {
+    if ((e.target as HTMLElement | null)?.tagName === "INPUT") return; // typing in the fish picker
     if (e.key === "m" || e.key === "M") {
       if (!e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) setMuted(!muted);
     }

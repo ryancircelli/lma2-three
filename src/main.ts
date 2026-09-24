@@ -10,7 +10,7 @@
 //   ?size=WxH          fixed canvas size in CSS px, e.g. 1024x768 (the original's mode)
 //   ?clean=1           hide all UI and play no sound (reference comparisons)
 //   ?aa=1              MSAA on (off by default: the original has none)
-//   ?tank=<slug>:<n>,...  stock only these species;  ?bare=1  no painting (flat water)
+//   ?tank=<slug>:<n>,...  stock only these species (the Fish picker sets it);  ?bare=1  no painting (flat water)
 //   ?sound=0 / ?volume=<dB>   ambient loop off / its level (see audio.ts)
 //   ?speed=0.5..4      playback speed (also the Speed selector)
 //
@@ -25,6 +25,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { type FishEntry, type FishModel, loadFish } from "./fish.ts";
 import { ambience } from "./audio.ts";
+import { fishPicker, stockParam } from "./fishpicker.ts";
 import { loadScene, nextRotationScene, type SceneModel } from "./scene.ts";
 import { Tank } from "./tank.ts";
 import { Effects } from "./effects.ts"; // --- effects: bubbles, light rays, light motes
@@ -54,6 +55,8 @@ declare global {
 
 const ASSETS = new URL("assets/", document.baseURI).href;
 const params = new URLSearchParams(location.search);
+/** The current params as a URL query, keeping ?tank=a:1,b:2 readable. */
+const query = () => `?${params}`.replace(/%3A/gi, ":").replace(/%2C/gi, ",");
 const view = params.get("view") === "fish" ? "fish" : "tank";
 const frozenT = params.has("t") ? Number(params.get("t")) : null;
 const frozenPhase = params.has("phase") ? Number(params.get("phase")) : null;
@@ -208,7 +211,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     // A scene picked by hand is pinned in the URL; a rotated one is not, so a
     // reload rotates on like a relaunch of the original.
     params.set("scene", select.value);
-    history.replaceState(null, "", `?${params}`);
+    history.replaceState(null, "", query());
     show(select.value);
   });
 
@@ -221,17 +224,40 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
 
   // The creatures, once the view exists (spawn points are chosen on screen).
   // ?fish=0 leaves the tank empty, for backdrop comparisons.
+  // [feat/fish] ?all=1: one of every species (to check each one);
+  // ?tank=<slug>:<n>,... only these (like tools/wine-ref.sh LMA2_TANK; the
+  // fish picker writes it too); else the configured tank.
+  const only = params.has("tank")
+    ? (params.get("tank") ?? "").split(",").map((e) => e.split(":")).filter((e) => e[0])
+    : null;
+  const stock: Record<string, number> = params.get("fish") === "0"
+    ? {}
+    : params.get("all") === "1"
+    ? Object.fromEntries(manifest.fish.map((f) => [f.slug, 1]))
+    : only
+    ? Object.fromEntries(only.map(([slug, n]) => [slug, Number(n ?? 1)]))
+    : manifest.tank;
+  if (frozenT === null) {
+    fishPicker({
+      panel,
+      fish: manifest.fish,
+      installed: manifest.tank,
+      initial: stock,
+      schooling: tank.schooling,
+      async onApply(next, schooling) {
+        tank.schooling = schooling;
+        await tank.restock(manifest.fish, next, ASSETS);
+        for (const k of ["all", "fish"]) params.delete(k);
+        params.set("tank", stockParam(next));
+        if (schooling) params.delete("school");
+        else params.set("school", "0");
+        history.replaceState(null, "", query());
+        done(`scene-${select.value}`, `Scene ${select.value} · ${tank.count} creatures`);
+      },
+    });
+  }
   if (params.get("fish") !== "0") {
     try {
-      // [feat/fish] ?all=1: one of every species (to check each one);
-      // ?tank=<slug>:<n>,... only these (like tools/wine-ref.sh LMA2_TANK);
-      // else the configured tank.
-      const only = params.get("tank")?.split(",").map((e) => e.split(":")).filter((e) => e[0]);
-      const stock = params.get("all") === "1"
-        ? Object.fromEntries(manifest.fish.map((f) => [f.slug, 1]))
-        : only?.length
-        ? Object.fromEntries(only.map(([slug, n]) => [slug, Number(n ?? 1)]))
-        : manifest.tank;
       await tank.populate(manifest.fish, stock, ASSETS);
     } catch (e) {
       fail(`fish: ${(e as Error).message}`);
@@ -372,7 +398,7 @@ async function fishView(manifest: Manifest): Promise<(t: number) => void> {
     const b = entry.behaviour;
     const beh = Object.keys(b).length ? ` · speed ${b.speed} · scale ${b.scale} · school ${b.school}` : "";
     params.set("fish", entry.slug);
-    history.replaceState(null, "", `?${params}`);
+    history.replaceState(null, "", query());
     done(entry.slug, `${entry.name} · ${model.kind} · ${model.triangles.toLocaleString()} tris${beh}`);
   }
   select.addEventListener("change", () => show(ordered.find((f) => f.slug === select.value)!));
@@ -410,7 +436,7 @@ async function main(): Promise<void> {
       timeScale = Number(select.value);
       if (timeScale === 1) params.delete("speed");
       else params.set("speed", select.value);
-      history.replaceState(null, "", `?${params}`);
+      history.replaceState(null, "", query());
     });
     const label = document.createElement("label");
     label.append("Speed ", select);
