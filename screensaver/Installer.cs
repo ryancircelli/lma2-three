@@ -1,6 +1,7 @@
 // Per-user install (no admin rights needed):
 //   %LOCALAPPDATA%\LMA2Screensaver\LMA2-Aquarium.scr   the screensaver itself
-//   HKCU\Control Panel\Desktop                          selected screensaver, wait time, lock
+//   HKCU\Control Panel\Desktop                          the selected screensaver (the wait time and
+//                                                       sign-in lock are Windows' settings: untouched)
 //   HKCU\...\Uninstall\LMA2Screensaver                  the Apps & features entry
 // Uninstall reverses all of it, including the unpacked site and WebView2 profile.
 
@@ -17,7 +18,7 @@ namespace Lma2Saver
         public const string ScrName = "LMA2-Aquarium.scr";
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\LMA2Screensaver";
         private const string DesktopKey = @"Control Panel\Desktop";
-        private const uint SPI_SETSCREENSAVETIMEOUT = 0x000F, SPI_SETSCREENSAVEACTIVE = 0x0011, SPI_SETSCREENSAVESECURE = 0x0077;
+        private const uint SPI_SETSCREENSAVEACTIVE = 0x0011;
         private const uint SPIF_UPDATEINIFILE = 0x01, SPIF_SENDCHANGE = 0x02;
 
         public static string Target
@@ -45,23 +46,7 @@ namespace Lma2Saver
             get { return string.Equals(Path.GetFullPath(Application.ExecutablePath), Target, StringComparison.OrdinalIgnoreCase); }
         }
 
-        public static int CurrentWaitMinutes()
-        {
-            using (RegistryKey d = Registry.CurrentUser.OpenSubKey(DesktopKey))
-            {
-                int seconds;
-                if (d != null && int.TryParse(d.GetValue("ScreenSaveTimeOut") as string, out seconds) && seconds > 0) return Math.Max(1, seconds / 60);
-            }
-            return 10;
-        }
-
-        public static bool CurrentSecure()
-        {
-            using (RegistryKey d = Registry.CurrentUser.OpenSubKey(DesktopKey))
-                return d != null && (d.GetValue("ScreenSaverIsSecure") as string) == "1";
-        }
-
-        public static void Install(int waitMinutes, bool secure)
+        public static void Install()
         {
             Directory.CreateDirectory(Embedded.DataDir);
             if (!IsRunningInstalledCopy)
@@ -77,13 +62,10 @@ namespace Lma2Saver
             {
                 d.SetValue("SCRNSAVE.EXE", Target);
                 d.SetValue("ScreenSaveActive", "1");
-                d.SetValue("ScreenSaveTimeOut", (waitMinutes * 60).ToString());
-                d.SetValue("ScreenSaverIsSecure", secure ? "1" : "0");
+                // Only if Windows has no wait time at all, so the screensaver can start.
+                if (d.GetValue("ScreenSaveTimeOut") == null) d.SetValue("ScreenSaveTimeOut", "600");
             }
-            const uint both = SPIF_UPDATEINIFILE | SPIF_SENDCHANGE;
-            Native.SystemParametersInfo(SPI_SETSCREENSAVETIMEOUT, (uint)(waitMinutes * 60), IntPtr.Zero, both);
-            Native.SystemParametersInfo(SPI_SETSCREENSAVESECURE, secure ? 1u : 0u, IntPtr.Zero, both);
-            Native.SystemParametersInfo(SPI_SETSCREENSAVEACTIVE, 1, IntPtr.Zero, both);
+            Native.SystemParametersInfo(SPI_SETSCREENSAVEACTIVE, 1, IntPtr.Zero, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
 
             long kb = 0;
             try { kb = new FileInfo(Target).Length / 1024 * 3; } catch (IOException) { } // .scr + unpacked site

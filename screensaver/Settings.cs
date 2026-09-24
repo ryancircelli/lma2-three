@@ -14,7 +14,10 @@ namespace Lma2Saver
         public string Aspect = "fit";   // fit | fill | stretch
         public bool Sound = true;       // the original's ambient loop (primary monitor only)
         public string Speed = "1";      // 0.5 .. 4
-        public string Tank = "installed"; // installed (the original's default tank) | all (one of every species)
+        // installed: the original's default tank (17)
+        // complete:  that tank with at least one of every species (25, the default)
+        // all:       one of every species (19)
+        public string Tank = "complete";
         public bool Schooling = true;
         public bool AllMonitors = true; // false: black on the other monitors
 
@@ -28,7 +31,7 @@ namespace Lma2Saver
                 s.Aspect = Str(k, "Aspect", s.Aspect, "fit", "fill", "stretch");
                 s.Sound = Flag(k, "Sound", s.Sound);
                 s.Speed = Str(k, "Speed", s.Speed, "0.5", "1", "1.5", "2", "3", "4");
-                s.Tank = Str(k, "Tank", s.Tank, "installed", "all");
+                s.Tank = Str(k, "Tank", s.Tank, "installed", "complete", "all");
                 s.Schooling = Flag(k, "Schooling", s.Schooling);
                 s.AllMonitors = Flag(k, "AllMonitors", s.AllMonitors);
             }
@@ -59,6 +62,7 @@ namespace Lma2Saver
             if (!Sound || !withSound) q.Add("sound=0");
             if (Speed != "1") q.Add("speed=" + Speed);
             if (Tank == "all") q.Add("all=1");
+            else if (Tank == "complete") q.Add("all=fill");
             if (!Schooling) q.Add("school=0");
             return "?" + string.Join("&", q);
         }

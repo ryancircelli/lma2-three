@@ -28,7 +28,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { type FishEntry, type FishModel, loadFish } from "./fish.ts";
 import { ambience } from "./audio.ts";
 import { setFixedFunctionFog } from "./fixedfunction.ts";
-import { fishPicker, stockParam } from "./fishpicker.ts";
+import { fishPicker, fullTank, stockParam } from "./fishpicker.ts";
 import { loadScene, nextRotationScene, type SceneModel } from "./scene.ts";
 import { Tank } from "./tank.ts";
 import { Effects } from "./effects.ts"; // --- effects: bubbles, light rays, light motes
@@ -269,6 +269,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   // The creatures, once the view exists (spawn points are chosen on screen).
   // ?fish=0 leaves the tank empty, for backdrop comparisons.
   // [feat/fish] ?all=1: one of every species (to check each one);
+  // ?all=fill: the configured tank with at least one of every species (25);
   // ?tank=<slug>:<n>,... only these (like tools/wine-ref.sh LMA2_TANK; the
   // fish picker writes it too); else the configured tank.
   const only = params.has("tank")
@@ -278,6 +279,8 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     ? {}
     : params.get("all") === "1"
     ? Object.fromEntries(manifest.fish.map((f) => [f.slug, 1]))
+    : params.get("all") === "fill"
+    ? fullTank(manifest.fish, manifest.tank)
     : only
     ? Object.fromEntries(only.map(([slug, n]) => [slug, Number(n ?? 1)]))
     : manifest.tank;

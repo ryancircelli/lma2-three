@@ -118,7 +118,7 @@ every load is a fresh launch. `?seed=N` replays one; reference captures (`?t=`, 
 WebView2 (the Edge engine built into Windows 10/11) on .NET Framework 4.8 (also built in), so nothing needs installing.
 
 - **Install:** run [LMA2-Aquarium-Setup.exe](https://github.com/ryancircelli/lma2-three/releases/latest/download/LMA2-Aquarium-Setup.exe),
-  choose the settings (plus the wait time and whether to show the sign-in screen on resume) and press **Install**. It installs
+  choose the settings (the Fish default is the original tank plus one of every other species: 25) and press **Install**. It installs
   per user without admin rights: the screensaver goes to `%LOCALAPPDATA%\LMA2Screensaver\LMA2-Aquarium.scr`, is selected in
   Screen Saver Settings, and gets an Apps & features entry for uninstalling. Running Setup again offers Update and Uninstall.
   It isn't code-signed, so SmartScreen may warn: *More info* > *Run anyway*. (`LMA2-Aquarium.scr` is also published for manual

@@ -26,18 +26,15 @@ namespace Lma2Saver
         private readonly ComboBox scene = Combo("Next scene each time (like the original)", "Scene 1", "Scene 2", "Scene 3");
         private readonly ComboBox view = Combo("Fit - 4:3 with black bars", "Fill - zoom to cover (crops)", "Stretch to the screen");
         private readonly ComboBox speed = Combo("0.5x", "1x", "1.5x", "2x", "3x", "4x");
-        private readonly ComboBox tank = Combo("The original's default tank", "One of every species (19)");
-        private readonly ComboBox wait = Combo("1 minute", "2 minutes", "3 minutes", "5 minutes", "10 minutes", "15 minutes", "20 minutes", "30 minutes", "45 minutes", "1 hour");
+        private readonly ComboBox tank = Combo("The original's tank (17)", "The original's tank + one of every other species (25)", "One of every species (19)");
         private readonly CheckBox schooling = new CheckBox { Text = "Schooling", AutoSize = true };
         private readonly CheckBox sound = new CheckBox { Text = "Play the underwater sound", AutoSize = true };
         private readonly CheckBox allMonitors = new CheckBox { Text = "Show on every monitor (otherwise black)", AutoSize = true };
-        private readonly CheckBox secure = new CheckBox { Text = "On resume, show the sign-in screen", AutoSize = true };
 
         private static readonly string[] Scenes = { "rotate", "1", "2", "3" };
         private static readonly string[] Views = { "fit", "fill", "stretch" };
         private static readonly string[] Speeds = { "0.5", "1", "1.5", "2", "3", "4" };
-        private static readonly string[] Tanks = { "installed", "all" };
-        private static readonly int[] WaitMinutes = { 1, 2, 3, 5, 10, 15, 20, 30, 45, 60 };
+        private static readonly string[] Tanks = { "installed", "complete", "all" };
 
         public SettingsForm(bool setup)
         {
@@ -76,8 +73,17 @@ namespace Lma2Saver
             Row(grid, "", allMonitors);
             if (setup)
             {
-                Row(grid, "Start after", wait);
-                Row(grid, "", secure);
+                // The wait time and sign-in on resume are Windows' own settings,
+                // left as they are; Install offers to open that dialog.
+                var note = new Label
+                {
+                    Text = "How long Windows waits, and whether it asks you to sign in afterwards, stay in Windows' Screen Saver Settings.",
+                    AutoSize = true,
+                    MaximumSize = new Size(460, 0),
+                    ForeColor = SystemColors.GrayText,
+                    Margin = new Padding(0, 8, 0, 0),
+                };
+                AddSpanning(grid, note);
             }
 
             var links = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 10, 0, 0) };
@@ -125,12 +131,6 @@ namespace Lma2Saver
             schooling.Checked = settings.Schooling;
             sound.Checked = settings.Sound;
             allMonitors.Checked = settings.AllMonitors;
-            int minutes = Installer.CurrentWaitMinutes();
-            int best = 0;
-            for (int i = 0; i < WaitMinutes.Length; i++)
-                if (Math.Abs(WaitMinutes[i] - minutes) < Math.Abs(WaitMinutes[best] - minutes)) best = i;
-            wait.SelectedIndex = best;
-            secure.Checked = Installer.CurrentSecure();
         }
 
         private void Store()
@@ -150,7 +150,7 @@ namespace Lma2Saver
             Store();
             try
             {
-                Installer.Install(WaitMinutes[wait.SelectedIndex], secure.Checked);
+                Installer.Install();
             }
             catch (Exception ex)
             {
@@ -160,8 +160,8 @@ namespace Lma2Saver
                 return;
             }
             DialogResult open = MessageBox.Show(this,
-                "Installed. Living Marine Aquarium 2 is now your screensaver and starts after " +
-                wait.Text + " of inactivity.\n\nOpen Windows' Screen Saver Settings to check?",
+                "Installed. Living Marine Aquarium 2 is now your screensaver.\n\n" +
+                "Open Windows' Screen Saver Settings to set how long it waits and whether it asks you to sign in?",
                 Text, MessageBoxButtons.YesNo, MessageBoxIcon.Information);
             if (open == DialogResult.Yes) Process.Start("control.exe", "desk.cpl,,@screensaver");
             Close();

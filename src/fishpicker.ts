@@ -73,6 +73,7 @@ export function fishPicker(o: FishPickerOptions): void {
     presets.append(b);
   };
   preset("Installed", "The install's settings.xml tank", () => o.installed);
+  preset("Installed + all", "The installed tank with at least one of every species", () => fullTank(species, o.installed));
   preset("One of each", "Every species once", () => Object.fromEntries(species.map((f) => [f.slug, 1])));
   preset("None", "Empty tank", () => ({}));
 
@@ -176,6 +177,11 @@ export function fishPicker(o: FishPickerOptions): void {
 }
 
 /** `?tank=slug:n,...` for a stock, omitting zeros (empty string for an empty tank). */
+/** A tank with at least one of every species: the 17-creature default becomes 25. */
+export function fullTank(fish: FishEntry[], base: Stock): Stock {
+  return Object.fromEntries(fish.map((f) => [f.slug, Math.max(1, base[f.slug] ?? 0)]));
+}
+
 export function stockParam(stock: Stock): string {
   return Object.entries(stock).filter(([, n]) => n > 0).map(([s, n]) => `${s}:${n}`).join(",");
 }
