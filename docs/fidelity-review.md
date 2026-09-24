@@ -1,6 +1,6 @@
 # Fidelity review (pessimist): the remake vs the original
 
-> **Round 2 (`main` @ 4d5476d, after feat/motion2 and feat/render2) is [at the end of this file](#round-2-main--4d5476d).**
+> **Round 2 (`main` @ 4d5476d) and Round 3 (`main` @ 38026f1) are at the end of this file. Round 3 has the current verdict.**
 > Sections 1-5 are the round-1 review of 4828608. They are kept as they were, for the before/after comparison.
 
 - **Reviewed:** `main` @ 4828608. **Branch:** `review/pessimist`.
@@ -635,3 +635,183 @@ Solo species match.
 - **Wine's software GL is the reference, not a 2005 driver.** That caps the painting at 42-45 dB and the caustic levels at ±9 %.
 - **The original seeds `rand()` per launch.** Zone timers (10-130 s), school membership, sea horse spawn, the star variant and the mask phases can match only in distribution. That is also why a single reference run under about 3 minutes cannot rank a species.
 - **The original integrates per frame.** Tested from 6 to 60 fps: turn rates change by about 20 %, speeds by less than 5 %.
+
+---
+
+# Round 3 (`main` @ 38026f1)
+
+Since round 2, two things landed:
+- 63b509a: back faces are now culled (FrontSide), and `?bare=1` has no creature fog. These were my round-2 items 1 and 7.
+- 38026f1: `tools/probe-track.ts` and `Tank.silhouettes()`. No motion code changed.
+
+I checked the motion agent's claims myself rather than taking them as given:
+- **Probe-track runs.** I ran `probe-track` on seeds it did not use: 21-24, all 3 scenes, at f30 and f5.
+- **Pipeline fairness.** I measured both sides with a new diagnostic, `tools/trackfair.py`.
+- **More reference launches.** I captured 8 new launches of the original (two at a time): 2 × yellow tang, 2 × purple tang (300 s), 2 × sea horse, and a second full-scene launch each for scenes 1 and 3. They are in `r3/ref/*`. The frames are thinned to every 60th to save disk; the tracks are kept.
+
+## R3.1 Is the same-pipeline comparison fair?
+
+`trackfair.py` reports the same quantities for both sides, per source. Scene 1 is shown; scenes 2 and 3 look the same.
+
+| Source | Frame dt | Blobs/frame | Blob area p50 | Width p50 | Track duration p50/p90 (s) | Turns/min | Turns/min, tracks ≥ 10 s | \|vy/vx\| |
+|---|---|---|---|---|---|---|---|---|
+| Wine reference, 300 s | 0.20 | 18.5 | 1170 | 42 | 5.4 / 15.8 | 3.73 | 4.39 | 0.43 |
+| probe-track f30, my seeds | 0.20 | 17.7 | 1213 | 45 | 4.6 / 14.2 | 2.80 | 3.30 | 0.44 |
+| probe-track f5, my seeds | 0.20 | 17.5 | 1302 | 47 | 4.8 / 13.8 | 3.10 | 3.39 | 0.48 |
+| probe-track f30, motion agent's seeds | 0.20 | 17.7 | 1205 | 45 | 5.0 / 14.4 | 2.72 | 3.14 | 0.47 |
+| Wine subsampled to 0.6 s | 0.60 | 18.5 | 1172 | 42 | 4.2 / 12.6 | 3.38 | 3.86 | 0.43 |
+| My round-2 browser run | 0.48 | 17.5 | 1222 | 46 | 4.9 / 13.8 | 2.47 | 2.38 | 0.44 |
+
+**The pipeline is fair enough for whole-tank statistics.** Frame interval, blob count, blob size and track length agree within about 10 %. Two biases remain, and they are small:
+- **Silhouette size.** Ours covers the whole triangle footprint, including fully transparent fin texels, so blobs are 3-12 % larger and merge slightly more.
+- **Solo fish tracks run longer in ours.** On single-species runs our track p90 is 35-83 s against 20-57 s. A synthetic mask has no near-threshold dropouts, motes or colour noise, so tracks break less. The "tracks ≥ 10 s" column is less sensitive to breaks, which is why I report it.
+
+**Occlusion.** `--occlude` hides behind-fish pixels only below the reef polyline. A real full-scene capture also loses fish behind the billboards, and in animated areas (plants, caustics, surface, bubbles) where the noise map raises the threshold. So probe-track reef-front numbers are only approximate, and I cross-check them against my real-pixel browser runs.
+
+**Frame rate.** Sampling matches (0.20 s both sides). Simulating at f5 instead of f30 changes turn counts by 5-20 %.
+
+## R3.2 Whole-tank turns: the motion agent is right, and my round-2 claim is retracted
+
+| Scene | Reference | Ours f30 / f5 (my seeds) | Tracks ≥ 10 s, ref vs ours f30 / f5 |
+|---|---|---|---|
+| 1 | 3.73 | 2.80 / 3.10 | 4.39 vs 3.30 / 3.39 |
+| 2 | 2.42 | 1.94 / 2.39 | 2.35 vs 2.25 / 2.56 |
+| 3 | 2.87 | 2.22 / 2.38 | 3.22 vs 2.55 / 2.50 |
+
+- This reproduces the motion agent's numbers on independent seeds.
+- Whole-tank turn rate is **not** too high. If anything it is 0.75-1.0× the reference.
+- Round 2's "1.2-2.3×" had two causes:
+  - I compared exact probe tracks against blob tracks.
+  - My browser runs for scenes 2 and 3 ran at about 1 s per frame (dt 0.96-1.04, against 0.6 for the subsampled reference). That changes track linking.
+- **Retracted.** The two new full-scene launches (with caustics) put the reference itself at 1.6 and 2.3 turns/min in scenes 1 and 3, against 2.3 and 2.4 in round 1. So launch-to-launch spread alone is about ±25 %.
+
+## R3.3 Per species, same pipeline
+
+The table compares probe-track (4 seeds × 180 s, scene 1) against the 180 s Wine references. "ref" values are single launches except where three are listed.
+
+| Species | Turns/min ref | Turns/min ours | ≥ 10 s ref / ours | \|vy/vx\| ref / ours | Verdict |
+|---|---|---|---|---|---|
+| **yellow tang** | 1.86 / **1.66** / **2.34** (3 launches, pooled 1.96) | 3.66 (my seeds); 2.71 (agent's 11 seeds); per seed 1.4-4.1, median about 2.9 | 2.11 / 3.05-3.79 | 0.44 / 0.41-0.43 | **OFF, 1.4-1.9×** |
+| convict tang | 3.10 | 3.67 (agent: 3.22) | 3.17 / 3.93 | 0.41 / 0.39 | CLOSE (1.0-1.2×, one launch) |
+| powder brown tang | 3.80 | 4.04 | 3.58 / 4.20 | 0.38 / 0.41 | CLOSE |
+| raccoon butterfly | 2.22 | 1.92 | 2.44 / 2.01 | 0.34 / 0.41 | CLOSE |
+| flame angel (solo) | 1.77 | 1.82 | 1.83 / 1.86 | 0.23 / **0.32** | MATCHES; climbs more |
+| purple tang (solo) | 1.79 | 2.03 | 1.72 / 2.07 | 0.27 / 0.28 | MATCHES |
+| juvenile angel (solo) | 1.08 | 1.68 | 1.06 / 1.74 | 0.21 / **0.29** | CLOSE (few events); climbs more |
+
+**Yellow tang turns too often: 1.4-1.9×.**
+- This is the one per-species excess that survives the fair pipeline.
+- The three new reference launches are tight: 1.66 to 2.34.
+- 7 of the motion agent's 11 seeds lie above the highest reference launch, and so does the pool of my 4 seeds.
+- So it is not launch spread. The motion agent's "2.6-2.9 vs 1.9" is correct, and the gap is real.
+- Other schooling species (convict, powder brown, raccoon) are within 1.0-1.2×.
+- One candidate: yellow tang is the largest schooling fish in the set (scale 8 against 6). Avoidance radius is 3.2·scale·meshRadius, and it applies between every same-species pair and the invisible leader, so a bigger fish means more avoidance turns inside its own school.
+- **Can close:** probably. Instrument avoidance events per school member (yellow tang against convict) and compare the turn sources.
+
+**Solo angels climb 35-40 % more.** Flame angel \|vy/vx\| is 0.32 against 0.23, juvenile angel 0.29 against 0.21; purple tang matches. Only three solo species have 180 s references. This is a small effect, and on thin reference data.
+
+## R3.4 Purple tang top speed: closed (it was a one-launch artefact)
+
+| | Speed p50/p90 (px/s) | Centre-y p50 |
+|---|---|---|
+| Reference, round-2 launch (180 s) | 14 / 64 | 313 |
+| Reference, new launch b (300 s) | 9 / 44 | 262 |
+| Reference, new launch c (300 s) | 9 / 50 | 259 |
+| Reference, 3 launches pooled | 10 / 51 | 266 |
+| Ours, probe-track | 10 / 48 | 168 |
+| Ours, exact probe | 10 / 42 | 232 |
+
+- My round-2 "p90 −34 %" came from the one fast launch. Pooled over three launches, ours is within 6-18 %: **MATCHES within launch spread.**
+- The flame angel p90 (50 against 60) has only one launch, but its turns and p50 match. I agree with "within spread".
+
+## R3.5 Sea horse lows: not explained by launch randomness
+
+Five scene-1 reference launches, blob centroids, blobs with area > 200 px:
+
+| Launch | Duration | Deepest centre y | % of time below y = 470 | Height p50/p90 |
+|---|---|---|---|---|
+| fish agent | 40 s | 338 (p98) | 0 | 75 / 111 |
+| round 2, sp | 180 s | **571** | 11.2 | 103 / 112 |
+| round 2, horse1 | 300 s | 475 | 0.1 | 82 / 111 |
+| round 3, b | 240 s | 484 | 0.7 | 72 / 106 |
+| round 3, c | 240 s | 463 | 0 | 74 / 109 |
+| **Ours**, 4 seeds × 180 s | | p98 619, max about 627 | 1.4-13.8 per seed | 73 / 110 |
+
+- **Instrumented, ours:** 10 seeds × 180 s × 3 horses, screen-y of the origin.
+  - Horses in zone mode 0 (near): p02/50/98 = 18 / 466 / **627**.
+  - Horses in zone mode 1 (far): p02/50/98 = 10 / 285 / 468.
+  - 627 is the horse floor `minY + 0.1·H` of the whole box. 468 is the same floor rule applied to the far zone (`zone.minY + 0.1·zoneH`).
+- **In the original:**
+  - Near-zone horses do exist: the round-2 launch has height p50 103 px, the near-zone size.
+  - They are visited low: 11 % of that launch was below 470.
+  - Yet across 5 launches (about 15 horses, 1000+ s) the deepest centroid is 571, and 4 of 5 launches never went below 484.
+- **Verdict:** ours reaches roughly 50 px lower than anything observed. Per-launch randomness alone is unlikely to hide a 627-px floor for 15 horses.
+- **Where it comes from is unresolved.** The navigator, the zone table (0x414770), the waypoint floor (0x417e40) and the per-frame clamp in 0x41f540 all read the same as our port. I re-checked the box argument order of the horse loader (0x41f330, via the disassembly at 0x4132af): it passes (min.x, 0.8·min.y, min.z), (max.x, max.y, 0.8·max.z), which matches ours.
+- **Can close:** probably. Next step: log the navigator state (mode, zone.minY, waypoint y, clamp) for one horse in ours. Then decide which floor the original must be using, from the 571 px launch; it sits between the two floors.
+
+## R3.6 Fish in front of the reef (two launches now)
+
+"Below" is the share of moving-fish detections below the reef line; the figure in brackets is the share more than 150 px below it.
+
+| Scene | Reference launch 1 | Reference launch 2 (new) | Ours, real-pixel browser run | Ours, probe-track --occlude, 4 seeds (agent) |
+|---|---|---|---|---|
+| 1 | 56.3 % (39.3) | 53.0 % (33.3) | 63.1 % (47.8) | 40-60 % (25-45) |
+| 3 | 48.5 % (26.5) | 52.0 % (28.8) | 43.6 % (18.7) | 31-47 % (15-29) |
+
+- **Scene 1:** ours brackets the reference. MATCHES within spread.
+- **Scene 3:** every one of our five measurements (4 seeds plus the real-pixel run) is below both reference launches. The gap is about −5 to −17 points, and −8 to −14 deep.
+  - It agrees with the scene-3 centre-y p50 being high since round 1: 187-209 against 221.
+  - It is small, but it is consistent, and it is scene-specific. Scene 3's reef line reaches down to y = 315, the lowest of the three scenes.
+- **Can close:** partially. The first step is to check the reef-line clamp against scene 3's `height` polyline, and the scene-3 zone/floor numbers.
+
+## R3.7 Colour after the FrontSide fix
+
+Measured with `tools/fishcolour.ts` on bare frames at the same `?t=` values as round 2. Our frames now also have no fog, like the original's bare mode.
+
+| Species | Ours R3 (R / G / B mean) | Reference (R / G / B mean) | Round 2 |
+|---|---|---|---|
+| yellow tang | 151.6 / 152.3 / **40.1** | 146.0-147.4 / 148.9-151.4 / **43.3-46.6** | B 30.0 (double-sided) |
+| purple tang | 48.2 / 54.3 / 114.8 | 45.2 / 50.3 / 105.2 | - |
+| flame angel | 144.9 / 95.1 / 61.5 | 135.5 / 84.9 / 51.2 | - |
+
+- **Yellow tang: CLOSED.** B is now within 3-6 levels, and R and G are within 1-6.
+- **Purple tang and flame angel** are 3-10 levels brighter in every channel in ours.
+  - That is the order of the Wine/WebGL rounding band plus sampling (12 frames, small fish).
+  - A small systematic gain difference in the fixed-function emulation cannot be excluded. The sign is not the same for every species: yellow tang B is lower.
+  - **CLOSE.**
+
+## R3.8 Round-3 verdict
+
+**The remake is not yet at the limit, but what remains is small and specific.** Almost everything else is now at the noise floor or within launch-to-launch spread.
+
+Round-3 closures, verified:
+- whole-tank turn rate (my round-2 claim was a measurement artefact);
+- purple tang top speed (a single-launch artefact);
+- yellow-tang colour (FrontSide);
+- the bare-mode fog.
+
+**Still closable, concretely:**
+1. **Yellow tang turn rate, 1.4-1.9×.** Three tight reference launches (1.66-2.34) against a median of about 2.9 over 15 seeds. The other schooling species are fine.
+   - Instrument the school's avoidance and leader turns; the suspect is the avoidance radius, which is scale-dependent, inside a school of large fish.
+   - **Closable: probably.**
+2. **Sea horse lower bound.** Ours goes down to 627 px; the original never went below 571 over 5 launches (4 of 5 stayed above 484).
+   - Log the navigator floors in ours and find which one the original applies to near-zone horses.
+   - **Closable: probably.**
+3. **Scene-3 in-front share and height,** about −8 points and about 30 px high, consistent over 5 of our runs against 2 launches.
+   - Check the reef-line blend and floor for scene 3.
+   - **Closable: partially.**
+4. **Minor:** solo angels climb 35-40 % more (\|vy/vx\| 0.29-0.32 against 0.21-0.23, on single launches). Not worth a change until a second launch confirms it.
+
+If items 1-3 turn out to be deliberate original behaviour that our port already matches (the decompile reads have not found a difference yet), then I would agree the remake is as close as reasonably possible. Until they have been instrumented, I do not.
+
+**Irreducible limits:**
+- **The reference is Wine's software GL, not a 2005 D3D6 driver.**
+  - Painting: 42-45 dB.
+  - Caustic level: ±9 % (scene 2 is 8.5 % dim).
+  - Creature colour: ±10 levels.
+- **Per-launch `rand()` seeded from GetTickCount.**
+  - Zone timers (10-130 s), school membership, sea-horse spawn, sea-star variant and plant mask phases can only match in distribution.
+  - Measured launch spread: turn rate ±25 % (whole tank), purple tang p90 44-64, sea horse time below 470 px 0-11 %.
+  - Any claim from one launch under about 3 minutes cannot rank a species.
+- **Per-frame integration in the original.** Changing the simulation rate from f5 to f30 moves turn counts by 5-20 %. Wine runs at about 5 fps; the original on real hardware would have run faster.
+- **Measurement.** probe-track's synthetic silhouettes break tracks less than real captures, and its reef-only occlusion is approximate. Differences below about 10 % in blob-pipeline statistics are within method error.
