@@ -147,11 +147,11 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   if (params.get("school") === "0") tank.schooling = false;
   renderer.autoClear = false;
 
-  // --- water surface (src/surface.ts): drawn in the painting's ortho pass,
-  // before the painting. ?surface=0 hides it (baseline for comparisons).
+  // --- water surface (src/surface.ts): scene pass 0, just before the
+  // Background (added to each scene's `back` in show()). ?surface=0 hides it
+  // (baseline for comparisons).
   const surface = await WaterSurface.load(ASSETS);
   surface.object.visible = params.get("surface") !== "0";
-  scene.add(surface.object);
   // --- end water surface
 
   const select = document.createElement("select");
@@ -174,11 +174,13 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
       return;
     }
     if (current) {
+      surface.object.removeFromParent(); // water surface: not the old scene's to dispose
       scene.remove(current.object);
       nearScene.remove(current.near);
       current.dispose();
     }
     await surface.setScene(id, ASSETS); // water surface
+    model.back.add(surface.object); // water surface
     current = model;
     scene.background = model.clearColor;
     scene.add(model.object);
@@ -212,6 +214,8 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     if (frozenT !== null) tank.simulateTo(frozenT);
     done(`scene-${select.value}`, `Scene ${select.value} · ${tank.count} creatures`);
   }
+  // water surface: its brightness depends on what else is drawn (surface.ts DIFFUSE)
+  surface.configure({ caustics: params.get("caustics") !== "0", creatures: tank.count > 0 });
 
   // Three passes, because the original composites two projections: the flat
   // painting (orthographic), the 3D creatures (perspective) in front of it, and

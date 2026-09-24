@@ -1,54 +1,68 @@
 // The water surface: the band of bright, moving streaks across the top of the
 // tank (common/watersurface.X textured with the caustics animation).
 //
-// How the original draws it (decompiled, FUN_0041c300) - and verified against
-// reference frames (tools/wine-surface.sh, tools/surfacemap.ts, tools/surfacestats.ts):
+// How the original draws it (docs/original-logic.md 5.5, 0x41c300), each point
+// verified against reference frames (tools/wine-surface.sh captures;
+// tools/surfacemap.ts, tools/surfacestats.ts):
 //
-//   - FIRST in the scene pass, before the Background plane, with the same
+//   - FIRST in scene pass 0, before the Background plane, through the same
 //     ORTHOGRAPHIC camera as the painting. So it shows only where the painting
-//     is transparent (measured: mean dG over painted pixels 1.8 vs 31 over open
-//     water), exactly like the clear colour it is added to.
-//   - The "perspective" is baked into the mesh: a trapezoid (x +-4.75 at z=+24,
-//     +-95 at z=-24) whose rows fold at z~12, so drawn flat it LOOKS like a
-//     horizontal plane seen from below. World = Scale(19,15,18) then
-//     Translate(0, bboxMaxY - 200, bboxMaxZ) over the scene's world bbox.
-//     Scene 1: rows land at 116/125/127/122/110/91/65/33/-7 px from the top;
-//     the fold at ~127 px is the "horizon". Measured per screen row, the
-//     texture repeat width runs 519.6 px (y=0) -> 161 px (y=126) and the texel
-//     row advances 2.2 repeats down the band: this placement reproduces both to
-//     0.3% / 0.4 texel (tools/surfacemap.ts on reference vs ours).
-//   - u 0..4 across, v 1..-2 over the rows, WRAP. The texture is the current
-//     caustics frame, floor(t * 18) % 29 + 1 (measured: 18.0 frames/s over a
-//     32 s reference sequence; the mesh's own "caust00.dds" is unused).
-//   - Blend ONE/ONE (additive; G clips at 255 in scene 1), z test off,
-//     colour = vertex diffuse x texture, then linear vertex fog to BLACK - the
-//     fog is what fades the streaks toward the horizon (gain ~0.9 at the top,
-//     ~0.4 at y=122). No scrolling: the mapping is identical 7 s apart.
-//   - Back faces culled: the part of the mesh that folds back up (rows 0-2) is
-//     not drawn (the measured gain near the fold fits the front layer alone).
+//     is transparent - measured: mean dG 31 over open water, 1.8 over painted
+//     pixels - like the clear colour it is added to.
+//   - The "perspective" is baked into the mesh: a trapezoid (x +-4.75 at
+//     z=+24, +-95 at z=-24) whose rows fold near z=12, so drawn flat it looks
+//     like a plane seen from below. World = Scale(19,15,18), then Translate(0,
+//     bboxMaxY - 200, bboxMaxZ) over the scene's world bbox. Scene 1: rows land
+//     116/125/127/122/110/91/65/33/-7 px from the top; the fold at ~127 px is
+//     the "horizon". Measured per screen row of the reference, BEFORE the
+//     decompile was available: the texture repeats every 519.6 px at y=0,
+//     falling to 161 px at y=126 (exactly periodic rows: autocorr 1.000), and
+//     the texel row advances 2.2 repeats down the band; a free camera fit
+//     converged on an orthographic view with x:y scale 1.27 (19/15 = 1.267).
+//     This placement predicts the period to 0.3% (519.6 at y=0, 224.7 vs 224.9
+//     at y=120, 160.2 vs 161.4 at y=126).
+//   - u 0..4 across, v 1..-2 over the rows, WRAP. Texture = the current caustics
+//     frame, shared with the Relief (caustics.ts causticClock: 18 fps; measured
+//     here too: 18.0 frames/s over a 32 s reference sequence). No UV scroll:
+//     the mapping is identical 7 s apart.
+//   - ONE/ONE additive, Z off, colour = texture x diffuse x fog, where the fog
+//     is linear vertex fog to BLACK - the only thing that fades the streaks
+//     toward the horizon.
+//   - Back faces culled: the rows that fold back up (0-2) are not drawn (with
+//     them the band near y=116-126 would be 10-30% brighter than measured).
 
 // @ts-types="npm:@types/three@0.186.0"
 import * as THREE from "three";
-import { handednessRoot, loadXDoc, type XMesh } from "./xloader.ts";
-
-/** Caustics animation: frames caustics_01..29, advanced by wall time. */
-const FRAMES = 29;
-const FPS = 18;
+import { causticClock, causticTextures } from "./caustics.ts";
+import { loadXDoc, type XMesh } from "./xloader.ts";
 
 /** World transform of the mesh, from the decompiled draw call. */
 const SCALE = { x: 19, y: 15, z: 18 };
 const DROP_Y = 200; // below the scene bbox's top
 
 // --- CALIBRATE ---------------------------------------------------------------
-/** The vertex diffuse (lit, white material) while the surface draws. The
- * decompile leaves it [inferred] (ambient 0x80 + L1 was the guess). Measured
- * frame-matched against the reference (same caustics frame, screenshots/
- * rowratio.py): with 0.5 + 0.5 (N . down) ours was 11% too dim at the top and
- * right at the fold, i.e. the reference is full-bright at every row - the
- * lighting saturates (plausibly the painted planes' 0xFFFFFFFF ambient state
- * still set from the previous frame). So: 1, with the fog doing all the fading.
- * ?surfshade=<v> overrides (calibration). */
-const DIFFUSE = Number(new URLSearchParams(globalThis.location?.search ?? "").get("surfshade") ?? 1);
+/**
+ * The vertex diffuse (R, G, B) the surface is drawn with. The decompile leaves
+ * the lighting at that moment [inferred]; it is in fact whatever state the
+ * previous frame left behind (a render-state leak), so it depends on what else
+ * is drawn. Measured in scene 1, frame-matched (the same caustics frame in the
+ * reference and here; screenshots/rowratio.py) or as a sequence mean:
+ *   caustics off, no creatures   1.00 at every row (ref/ours 1.002; per band 0.995-1.007)
+ *   caustics on,  no creatures   0.50 at every row (ref/ours 0.503 with 1.0)
+ *   caustics off, creatures      R 0.65, G 0.61 (sequence mean, 74 frames)
+ *   caustics on,  creatures      R 0.64, G 0.46 (sequence mean, 74 frames)
+ * Flat across rows in every case: no dependence on the mesh normals. With
+ * creatures the tint changes from frame to frame (dG/dR 0.54-0.72): these are
+ * means. B cannot be measured in scene 1 (the clear colour's B is already
+ * 255), so B = G is assumed. ?surfshade=<v> forces a grey level.
+ */
+const DIFFUSE: Record<string, [number, number, number]> = {
+  plain: [1, 1, 1],
+  caustics: [0.5, 0.5, 0.5],
+  creatures: [0.65, 0.61, 0.61],
+  "creatures+caustics": [0.64, 0.46, 0.46],
+};
+const SHADE_OVERRIDE = new URLSearchParams(globalThis.location?.search ?? "").get("surfshade");
 // ------------------------------------------------------------------------------
 
 /** Linear fog to black, as the original sets it up from the scene depth
@@ -75,7 +89,7 @@ const vertexShader = /* glsl */ `
 // = lerp(black, colour, f) = colour * f.
 const fragmentShader = /* glsl */ `
   uniform sampler2D map;
-  uniform float diffuse;
+  uniform vec3 diffuse;
   varying vec2 vUv;
   varying float vFog;
   void main() {
@@ -84,20 +98,22 @@ const fragmentShader = /* glsl */ `
 `;
 
 export class WaterSurface {
-  /** Add to the painting's (orthographic) scene; it draws before the painting. */
-  readonly object = handednessRoot();
+  /** Add to the scene's pass-0 group (`SceneModel.back`, mirrored for
+   * handedness): the geometry is in .X world space. */
+  readonly object = new THREE.Group();
   private readonly material: THREE.ShaderMaterial;
   private readonly mesh: THREE.Mesh;
-  private frame = -1;
+  private readonly textures: THREE.Texture[];
 
-  private constructor(private readonly src: XMesh, private readonly textures: THREE.Texture[]) {
+  private constructor(private readonly src: XMesh, assetsUrl: string) {
     this.object.name = "water-surface";
+    this.textures = causticTextures(assetsUrl);
     this.material = new THREE.ShaderMaterial({
-      uniforms: { map: { value: textures[0] }, diffuse: { value: DIFFUSE } },
+      uniforms: { map: { value: this.textures[0] }, diffuse: { value: new THREE.Vector3(1, 1, 1) } },
       vertexShader,
       fragmentShader,
-      // Opaque-list material (drawn before the transparent painting) with
-      // custom blending: exactly D3D's SRCBLEND=ONE, DESTBLEND=ONE.
+      // Opaque-list material (drawn before every transparent part of the
+      // painting) with custom blending: exactly D3D's SRCBLEND=ONE, DESTBLEND=ONE.
       transparent: false,
       blending: THREE.CustomBlending,
       blendSrc: THREE.OneFactor,
@@ -108,30 +124,27 @@ export class WaterSurface {
       side: THREE.FrontSide, // D3D's default CULL_CCW (the Z mirror keeps "front" the same)
     });
     this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
-    this.mesh.renderOrder = -1000;
     this.mesh.frustumCulled = false;
     this.object.add(this.mesh);
+    this.configure({ caustics: false, creatures: false });
   }
 
   static async load(assetsUrl: string): Promise<WaterSurface> {
     const doc = await loadXDoc(`${assetsUrl}common/watersurface.X`);
     const src = doc.meshes.find((m) => m.faces.length && m.uvs);
     if (!src) throw new Error("watersurface.X: no textured mesh");
-    const loader = new THREE.TextureLoader();
-    const textures = await Promise.all(
-      Array.from({ length: FRAMES }, (_, i) =>
-        loader.loadAsync(`${assetsUrl}common/caustics_${String(i + 1).padStart(2, "0")}.png`).then((t) => {
-          t.wrapS = t.wrapT = THREE.RepeatWrapping;
-          t.colorSpace = THREE.NoColorSpace; // raw values - see the fragment shader
-          return t;
-        })
-      ),
-    );
-    return new WaterSurface(src, textures);
+    return new WaterSurface(src, assetsUrl);
+  }
+
+  /** Pick the measured diffuse for what else the tank draws (see DIFFUSE). */
+  configure(state: { caustics: boolean; creatures: boolean }): void {
+    const key = [state.creatures && "creatures", state.caustics && "caustics"].filter(Boolean).join("+") || "plain";
+    const d = SHADE_OVERRIDE !== null ? [1, 1, 1].map(() => Number(SHADE_OVERRIDE)) : DIFFUSE[key];
+    (this.material.uniforms.diffuse.value as THREE.Vector3).set(d[0], d[1], d[2]);
   }
 
   /** Place the surface for a scene: it hangs from the top of the scene's world
-   * bounding box (every mesh in its mesh.X, Relief included), in .X space. */
+   * bounding box (every vertex in its mesh.X, Relief included), in .X space. */
   async setScene(id: string, assetsUrl: string): Promise<void> {
     const doc = await loadXDoc(`${assetsUrl}scenes/${id}/mesh.X`);
     const box = new THREE.Box3(), v = new THREE.Vector3();
@@ -139,6 +152,9 @@ export class WaterSurface {
       for (let i = 0; i < m.positions.length; i += 3) box.expandByPoint(v.fromArray(m.positions, i).applyMatrix4(m.world));
     }
     this.build(box);
+    // Scene objects are ordered far to near by renderOrder = -z (scene.ts);
+    // this goes just before the Background (z = bbox max z).
+    this.mesh.renderOrder = -box.max.z - 1;
   }
 
   private build(box: THREE.Box3): void {
@@ -164,17 +180,13 @@ export class WaterSurface {
     this.mesh.geometry = g;
   }
 
-  /** Show the caustics frame for time `t` (seconds). */
+  /** Show the caustics frame for time `t` (seconds) - the Relief's clock. */
   update(t: number): void {
-    const k = ((Math.floor(t * FPS) % FRAMES) + FRAMES) % FRAMES;
-    if (k === this.frame) return;
-    this.frame = k;
-    this.material.uniforms.map.value = this.textures[k];
+    this.material.uniforms.map.value = this.textures[causticClock(t).frame];
   }
 
   dispose(): void {
     this.mesh.geometry.dispose();
-    this.material.dispose();
-    for (const t of this.textures) t.dispose();
+    this.material.dispose(); // the textures are shared with caustics.ts
   }
 }
