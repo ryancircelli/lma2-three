@@ -298,6 +298,28 @@ const WATER: Record<string, number> = { "1": 0x008aff, "2": 0x00cbfd, "3": 0x036
 /** The crab's walk phase counts pose FRAMES: pose int(phase)%12+1 blended into the next. */
 const CRAB_FRAMES = 12;
 
+/**
+ * Fish food (not in the original): a click drops a pinch of flakes that sink
+ * slowly; nearby fish break off, dart to the nearest flake and eat it.
+ * Uses Math.random, never the creatures' rand(), so the original's random
+ * sequence is untouched when nobody feeds.
+ */
+interface Flake {
+  pos: THREE.Vector3; // .X space, like Fish.pos
+  vy: number;
+  wobble: number;
+  age: number;
+  mesh: THREE.Mesh;
+}
+/** Fish within this fraction of the tank width of a flake come for it. */
+const FEED_REACH = 0.55;
+/** Swim-speed multiplier while darting for food. */
+const FEED_BOOST = 2.6;
+/** Turn rate toward food, radians per second. */
+const FEED_TURN = 5;
+/** Uneaten flakes vanish after this many seconds. */
+const FLAKE_LIFE = 15;
+
 export class Tank {
   /** Creatures in FRONT of the foreground painting (drawn last). */
   readonly scene = new THREE.Scene();
@@ -321,6 +343,9 @@ export class Tank {
   private sceneId: string | null = null;
   private t = 0;
   private predatorClock = 10;
+  private food: Flake[] = [];
+  private flakeGeo: THREE.BufferGeometry | null = null;
+  private flakeMat = new THREE.MeshBasicMaterial({ color: 0xd8a860, fog: false });
   /** Linear depth fog on fish and sea horses toward the water colour, from the
    * foreground plane (z = 0) to z = 2 * bbox.max.z. (View depth = 10000 + z.) */
   private fog = new THREE.Fog(0x008aff, 10000, 12000);
@@ -407,6 +432,7 @@ export class Tank {
     this.fog.near = 10000;
     this.fog.far = 10000 + 2 * bbox.maxZ;
     setFixedFunctionScene({ bbox, fogColor: WATER[id] ?? 0, fogNear: this.fog.near, fogFar: this.fog.far }); // [render2]
+    this.clearFood();
     for (const f of this.fish) this.spawn(f);
     for (const c of this.crabs) this.placeCrab(c);
     for (const st of this.stars) this.placeStar(st);
@@ -1045,10 +1071,12 @@ export class Tank {
     f.sa = this.moodSpeed(f.sm, tt, f.sa, 15);
     const step = (f.sa + 2) * f.speed * dt * 0.006666667;
     f.reaim -= step; // in STEP units, not seconds
+    // [feeding] the nearest flake in reach overrides the leader and zone turns below
+    const food = f.isLeader ? null : this.nearestFlake(p);
 
     // following a leader (schooling, or a trigger chasing a clown)
     const L = f.leader;
-    if (L) {
+    if (L && !food) {
       const [near, far] = BANDS[f.band];
       const d2 = p.distanceToSquared(L.pos);
       if (d2 <= far * far) {
@@ -1071,13 +1099,14 @@ export class Tank {
     const { inside, side } = zoneTest(zone, p.x, p.y, p.z);
 
     // avoidance turn: tail-beat gated, |-cos 5tt| strong
-    if (f.avoid && Math.abs(f.avoidTurn) > 0.3) {
+    if (!food && f.avoid && Math.abs(f.avoidTurn) > 0.3) {
       const dd = step * 10 * Math.abs(f.gateMag) * ease(Math.min(tt - f.avoidStart, 1));
       if (f.avoidTurn >= 0) {
         if (f.gateR) f.avoidTurn -= dd, f.yaw -= dd;
       } else if (f.gateL) f.avoidTurn += dd, f.yaw += dd;
     }
-    if (!inside) {
+    if (food) this.steerToFood(f, food, zone, tt, dt);
+    else if (!inside) {
       if (side === 0) {
         if (f.pitch < 0.2) f.pitch += 5 * step;
       } else if (side === 1) {
@@ -1122,10 +1151,11 @@ export class Tank {
     p.add(prev).multiplyScalar(0.5);
     const depth = b.maxZ - b.minZ;
     f.size = f.scale * 0.8 + (b.maxZ - Math.max(p.z, b.minZ)) / depth * 0.4;
-    const dx = ((b.maxZ - p.z) / depth + 0.5) * step * 1000;
+    const dx = ((b.maxZ - p.z) / depth + 0.5) * step * 1000 * (food ? FEED_BOOST : 1);
     f.mdir.set(Math.cos(pitch) * Math.cos(yaw), Math.sin(pitch), -Math.cos(pitch) * Math.sin(yaw));
     p.addScaledVector(f.mdir, dx);
     f.mpos.copy(p);
+    if (food) this.bite(f, food);
 
     // after the move, at full strength: the reef line and the avoidance push
     let locked = false;
@@ -1219,6 +1249,113 @@ export class Tank {
     }
   }
 
+  // --- fish food (not in the original) --------------------------------------------------
+
+  /**
+   * Drop a pinch of flakes where the view was clicked: (nx, ny) in -1..1 over
+   * the 4:3 frame. They start just behind the front glass, in front of the reef.
+   */
+  feed(nx: number, ny: number): void {
+    if (!this.data) return;
+    const c = this.camera, d = this.data, b = d.bounds;
+    const W = b.maxX - b.minX, H = b.maxY - b.minY, depth = b.maxZ - b.minZ;
+    const x = c.left + (nx + 1) / 2 * (c.right - c.left);
+    const y = Math.max(c.bottom + (ny + 1) / 2 * (c.top - c.bottom), d.floor(x) + 0.02 * H);
+    const z = Math.min(b.minZ + 0.25 * depth, -150);
+    this.flakeGeo ??= new THREE.IcosahedronGeometry(1, 0);
+    for (let i = 0; i < 4; i++) {
+      const mesh = new THREE.Mesh(this.flakeGeo, this.flakeMat);
+      const r = W * (0.0035 + Math.random() * 0.0025);
+      mesh.scale.set(r, r * 0.55, r);
+      mesh.rotation.set(Math.random() * 6.3, Math.random() * 6.3, 0);
+      mesh.matrixAutoUpdate = true;
+      this.scene.add(mesh);
+      this.food.push({
+        pos: new THREE.Vector3(x + (Math.random() - 0.5) * W * 0.035, y + (Math.random() - 0.5) * H * 0.03, z + (Math.random() - 0.5) * depth * 0.04),
+        vy: -H * (0.025 + Math.random() * 0.02),
+        wobble: Math.random() * 6.3,
+        age: 0,
+        mesh,
+      });
+    }
+    this.syncFood();
+  }
+
+  /** How many flakes are in the water (for tests). */
+  get foodCount(): number {
+    return this.food.length;
+  }
+
+  private updateFood(dt: number): void {
+    const d = this.data!, H = d.bounds.maxY - d.bounds.minY;
+    for (const k of this.food) {
+      k.age += dt;
+      k.wobble += dt * 2.2;
+      const rest = d.floor(k.pos.x) + 0.01 * H;
+      if (k.pos.y > rest) {
+        k.pos.y = Math.max(rest, k.pos.y + k.vy * dt);
+        k.pos.x += Math.sin(k.wobble) * H * 0.012 * dt;
+        k.mesh.rotation.y += dt * 1.5;
+      }
+    }
+    const gone = this.food.filter((k) => k.age > FLAKE_LIFE);
+    for (const k of gone) this.removeFlake(k);
+    this.syncFood();
+  }
+
+  private syncFood(): void {
+    // .X space -> three.js: z mirrored (see place())
+    for (const k of this.food) k.mesh.position.set(k.pos.x, k.pos.y, -k.pos.z);
+  }
+
+  private nearestFlake(p: THREE.Vector3): Flake | null {
+    if (!this.food.length) return null;
+    const b = this.data!.bounds, reach = FEED_REACH * (b.maxX - b.minX);
+    let best: Flake | null = null, bd = reach * reach;
+    for (const k of this.food) {
+      const dd = p.distanceToSquared(k.pos);
+      if (dd < bd) bd = dd, best = k;
+    }
+    return best;
+  }
+
+  /** Turn and pitch straight for the flake, and speed up. */
+  private steerToFood(f: Fish, k: Flake, zone: Box, tt: number, dt: number): void {
+    const p = f.pos, H = this.data!.bounds.maxY - this.data!.bounds.minY;
+    let ty = k.pos.y;
+    // Behind the painting and low: rise over the reef first rather than
+    // swimming through it (the reef-line rule would hold it behind anyway).
+    if (!f.front && k.pos.z < 0) ty = Math.max(ty, this.reefLine(p.x, 0, zone) + 0.08 * H);
+    const tx = k.pos.x - p.x, tz = k.pos.z - p.z, tyd = ty - p.y;
+    let dy = Math.atan2(-tz, tx) - f.yaw;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy)); // shortest way round
+    f.yaw += Math.max(-FEED_TURN * dt, Math.min(FEED_TURN * dt, dy));
+    const want = Math.max(-0.9, Math.min(0.9, Math.atan2(tyd, Math.hypot(tx, tz))));
+    f.pitch += Math.max(-3 * dt, Math.min(3 * dt, want - f.pitch));
+    f.leadTurn = 0;
+    f.zoneTurn = 0;
+    f.zoneTurnStart = tt;
+    if (f.sm.state !== 1) this.moodForce(f.sm, 1, tt, 0.6); // burst to top speed
+  }
+
+  /** Eat the flake if the fish's nose is on it. */
+  private bite(f: Fish, k: Flake): void {
+    const nose = f.mpos.clone().addScaledVector(f.mdir, f.size * this.radius(f) * 0.8);
+    const W = this.data!.bounds.maxX - this.data!.bounds.minX;
+    const reach = Math.max(f.size * this.radius(f) * 0.7, W * 0.012);
+    if (nose.distanceTo(k.pos) < reach || f.mpos.distanceTo(k.pos) < reach) this.removeFlake(k);
+  }
+
+  private removeFlake(k: Flake): void {
+    const i = this.food.indexOf(k);
+    if (i >= 0) this.food.splice(i, 1);
+    this.scene.remove(k.mesh);
+  }
+
+  private clearFood(): void {
+    for (const k of [...this.food]) this.removeFlake(k);
+  }
+
   /** Mirror the .X-space matrix into three.js and file the creature in front of / behind the painting. */
   private place(f: Fish): void {
     f.holder!.matrix.premultiply(Tank.MIRROR).multiply(Tank.MIRROR);
@@ -1248,6 +1385,7 @@ export class Tank {
     }
     for (const c of this.crabs) this.updateCrab(c, dt);
     for (const s of this.stars) this.updateStar(s, dt);
+    if (this.food.length) this.updateFood(dt);
     for (const f of this.fish) this.computeAvoidance(f);
     for (const f of this.fish) {
       if (f.kind === "horse") this.updateHorse(f, dt);
@@ -1374,6 +1512,9 @@ export class Tank {
   }
 
   dispose(): void {
+    this.clearFood();
+    this.flakeGeo?.dispose();
+    this.flakeGeo = null;
     for (const m of this.models.values()) m.dispose();
     this.models.clear();
     this.fish = [];

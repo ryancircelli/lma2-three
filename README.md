@@ -109,6 +109,10 @@ Live at **https://lma2.ryancircelli.com**. The panel (top left) has:
 - **Fish (N)** - how many of each of the 19 species (0-100; crab and sea star 0-1), presets, schooling. `?tank=slug:n,...`
 - **Speed** - 0.5x to 4x playback. `?speed=`
 - **Fullscreen** - also **F** or double-click; the panel and cursor hide until the mouse moves, and the display is kept awake.
+- **Fish food** (not in the original) - click in the tank to drop a pinch of flakes. They sink slowly; fish in reach break off,
+  dart to the nearest flake and eat it (usually within a second or so), then go back to their usual swimming. Sea horses, the
+  crab and the sea star ignore it. Off in reference captures (`?t=`, `?clean=1`) and in the screensaver, where a click exits;
+  the flakes use their own randomness, so the original's creature behaviour is unchanged until someone feeds.
 
 Randomness: normal viewing seeds the original's MSVC `rand()` from the clock, like the original's `srand(GetTickCount())`, so
 every load is a fresh launch. `?seed=N` replays one; reference captures (`?t=`, `?clean=1`) use a fixed stream.

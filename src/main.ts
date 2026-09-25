@@ -54,6 +54,9 @@ interface Status {
 declare global {
   interface Window {
     lma2: Status;
+    /** Drop fish food at (nx, ny) in -1..1 over the frame (tests). */
+    lma2Feed?: (nx: number, ny: number) => void;
+    lma2Food?: () => number;
   }
 }
 
@@ -194,6 +197,20 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   const effects = new Effects(ASSETS, params, nearScene); // --- effects (see effects.ts for the layering)
   if (params.get("school") === "0") tank.schooling = false;
   renderer.autoClear = false;
+
+  // Fish food: a click in the tank drops a pinch of flakes (tank.feed). Not in
+  // captures (the tank must stay the original's) or the screensaver (a click exits).
+  if (!capture && params.get("saver") !== "1") {
+    window.lma2Feed = (nx: number, ny: number) => tank.feed(nx, ny); // for tests
+    window.lma2Food = () => tank.foodCount;
+    canvas.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      const r = canvas.getBoundingClientRect(), f = frameRect;
+      const x = e.clientX - r.left - f.x, y = e.clientY - r.top - f.y;
+      if (x < 0 || y < 0 || x > f.w || y > f.h) return; // the black bars
+      tank.feed((x / f.w) * 2 - 1, 1 - (y / f.h) * 2);
+    });
+  }
 
   // --- water surface (src/surface.ts): scene pass 0, just before the
   // Background (added to each scene's `back` in show()). ?surface=0 hides it
