@@ -113,7 +113,7 @@ Live at **https://lma2.ryancircelli.com**. The panel (top left) has:
 - **Fish food** (not in the original) - click in the tank to drop a pinch of flakes; hold the button to keep pouring (up to
   40 in the water). They sink slowly, and the bubble column lifts any that drift into it and throws them out to the side. Fish
   in reach break off and dart for the nearest flake; it is eaten only when a fish's mouth (the front tip of its model) reaches
-  it, so they sometimes overshoot and come round again. A fish that has eaten ignores food for 10-15 s, so the others get a
+  it, so a fish sometimes overshoots - but only once: on its way back the flake is sucked into its mouth. A fish that has eaten ignores food for 10-15 s, so the others get a
   turn. Sea horses, the crab and the sea star ignore it. A double-click toggles fullscreen and takes back its first click's
   pinch. Off in reference captures (`?t=`, `?clean=1`) and in the screensaver, where a click exits;
   the flakes use their own randomness, so the original's creature behaviour is unchanged until someone feeds.

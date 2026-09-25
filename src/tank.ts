@@ -357,6 +357,10 @@ export class Tank {
   private flakeMat = new THREE.MeshBasicMaterial({ color: 0xd8a860, fog: false });
   /** Each species' mouth in its holder's local space (mouthOf). */
   private mouths = new Map<string, THREE.Vector3>();
+  /** Each feeding fish's approach to its flake: closest mouth distance so far, and whether it has missed once. */
+  private approach = new Map<Fish, { k: Flake; ahead: boolean; missed: boolean }>();
+  /** Feeding counters (tests): flakes eaten, first misses, and second passes (always eaten). */
+  readonly feedStats = { eats: 0, misses: 0, repeats: 0 };
   /** Fish that have eaten, and the tank time until which they ignore food. */
   private fullUntil = new Map<Fish, number>();
   /** The bubble column's axis x (.X space), or null: set by the page (effects.bubbleColumn). */
@@ -1087,7 +1091,7 @@ export class Tank {
     const step = (f.sa + 2) * f.speed * dt * 0.006666667;
     f.reaim -= step; // in STEP units, not seconds
     // [feeding] the nearest flake in reach overrides the leader and zone turns below
-    const food = f.isLeader || (this.fullUntil.get(f) ?? -1) > this.t ? null : this.nearestFlake(p);
+    const food = f.isLeader || (this.fullUntil.get(f) ?? -1) > this.t ? null : this.targetFlake(f);
 
     // following a leader (schooling, or a trigger chasing a clown)
     const L = f.leader;
@@ -1214,7 +1218,7 @@ export class Tank {
       .multiply(new THREE.Matrix4().makeRotationZ(pitch))
       .multiply(new THREE.Matrix4().makeScale(f.size, f.size, f.size));
     this.place(f);
-    if (food) this.bite(f, food);
+    if (food) this.bite(f, food, dt);
     if (this.animate && f.inst.swim) f.inst.swim({ tt, ph: f.ph, sa: f.sa, speed: f.speed });
   }
 
@@ -1359,6 +1363,18 @@ export class Tank {
     for (const k of this.food) k.mesh.position.set(k.pos.x, k.pos.y, -k.pos.z);
   }
 
+  /**
+   * The flake this fish is after: the one it locked onto (until it eats it or
+   * the flake is gone), else the nearest in reach. Without the lock, a fish
+   * that overshot one flake in a poured line would switch to the next, and the
+   * next, and never finish any.
+   */
+  private targetFlake(f: Fish): Flake | null {
+    const locked = this.approach.get(f)?.k;
+    if (locked && this.food.includes(locked)) return locked;
+    return this.nearestFlake(f.pos);
+  }
+
   private nearestFlake(p: THREE.Vector3): Flake | null {
     if (!this.food.length) return null;
     const b = this.data!.bounds, reach = FEED_REACH * (b.maxX - b.minX);
@@ -1421,19 +1437,43 @@ export class Tank {
     return m;
   }
 
-  /** Eat the flake if the fish's mouth is on it. */
-  private bite(f: Fish, k: Flake): void {
+  /**
+   * Eat the flake if the fish's mouth is on it. A fish may miss once: its mouth
+   * passes close and pulls away. After that, on the way back, a flake within
+   * striking distance is sucked into its mouth, so the second pass always
+   * lands (steering is untouched).
+   */
+  private bite(f: Fish, k: Flake, dt: number): void {
     // holder.matrix is this frame's WORLD in three.js space (z mirrored from .X space)
     const mouth = this.mouthOf(f).clone().applyMatrix4(f.holder!.matrix);
     mouth.z = -mouth.z;
     const W = this.data!.bounds.maxX - this.data!.bounds.minX;
+    const d = mouth.distanceTo(k.pos);
+    // A pass: the flake goes from ahead of the fish to behind it, close by. Judged
+    // on the steady heading (not the mouth, which swings with every tail beat).
+    const toFlake = new THREE.Vector3().subVectors(k.pos, f.mpos);
+    const ahead = f.heading.x * toFlake.x + f.heading.z * toFlake.z > 0;
+    let a = this.approach.get(f);
+    if (!a || a.k !== k) this.approach.set(f, a = { k, ahead, missed: false });
+    let second = false;
+    if (a.ahead && !ahead && toFlake.length() < 0.06 * W) {
+      if (!a.missed) a.missed = true, this.feedStats.misses++; // the one allowed miss
+      else second = true, this.feedStats.repeats++; // the second pass is a hit, whatever the aim
+    }
+    a.ahead = ahead;
+    // After the miss: the inhale, while the flake is ahead and near.
+    if (a.missed && ahead && d < 0.05 * W) k.pos.lerp(mouth, Math.min(1, 10 * dt));
+    if (second) k.pos.copy(mouth);
     if (mouth.distanceTo(k.pos) < W * 0.009) {
+      this.approach.delete(f);
+      this.feedStats.eats++;
       this.removeFlake(k);
       this.fullUntil.set(f, this.t + FULL_TIME * (1 + 0.5 * Math.random())); // one flake each, then others get a turn
     }
   }
 
   private removeFlake(k: Flake): void {
+    for (const [f, a] of this.approach) if (a.k === k) this.approach.delete(f);
     const i = this.food.indexOf(k);
     if (i >= 0) this.food.splice(i, 1);
     this.scene.remove(k.mesh);
@@ -1442,6 +1482,7 @@ export class Tank {
   private clearFood(): void {
     for (const k of [...this.food]) this.removeFlake(k);
     this.fullUntil.clear();
+    this.approach.clear();
   }
 
   /** The fish's mouth in .X space (for tests), or null for a leader / sea horse. */
