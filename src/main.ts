@@ -11,7 +11,7 @@
 //   ?clean=1           hide all UI and play no sound (reference comparisons)
 //   ?aa=1              MSAA on (off by default: the original has none)
 //   ?tank=<slug>:<n>,...  stock only these species (the Fish picker sets it);  ?bare=1  no painting (flat water)
-//   ?sound=0 / ?volume=<dB>   ambient loop off / its level (see audio.ts)
+//   ?sound=0 / ?volume=<dB>   ambient loop off / its level, 0 = the original's (see audio.ts)
 //   ?speed=0.5..4      playback speed (also the Speed selector)
 //   ?aspect=fit|fill|stretch  window shape (also the View selector): 4:3 with
 //                      black bars (default), zoom to cover, or stretch

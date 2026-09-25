@@ -104,7 +104,8 @@ Live at **https://lma2.ryancircelli.com**. The panel (top left) has:
 - **Scene** - 1 to 3. With no `?scene=`, each load shows the next scene, as each launch of the original did.
 - **View** - how the original's 4:3 frame meets another window shape: **Fit** (4:3 with black bars, the default), **Fill**
   (zoom to cover, crops top and bottom on 16:9) or **Stretch**. `?aspect=fit|fill|stretch`.
-- **Sound** - the original's one ambient loop; **M** mutes. `?sound=0`, `?volume=<dB>` (default -12).
+- **Sound** - the original's one ambient loop at its original level, with a volume slider beside it; **M** mutes.
+  `?sound=0`, `?volume=<dB>` (0 = original).
 - **Fish (N)** - how many of each of the 19 species (0-100; crab and sea star 0-1), presets, schooling. `?tank=slug:n,...`
 - **Speed** - 0.5x to 4x playback. `?speed=`
 - **Fullscreen** - also **F** or double-click; the panel and cursor hide until the mouse moves, and the display is kept awake.
@@ -153,9 +154,10 @@ adversarial reviewer, using logic recovered by decompiling the original (`docs/o
 ## Sound
 
 The original's only sound, `Sound_undwater.ogg`, loops gaplessly (Web Audio) in the tank view. Browsers allow audio only after
-a gesture, so it starts on the first click or key press. **M** or the panel button toggles mute (remembered per browser).
-`?sound=0` disables it; `?volume=<dB>` sets the level, default **-12 dB** (the bubbling is loud at the original level; the
-install was patched down by the same amount). `?clean=1` and `?t=` captures are silent.
+a gesture, so it starts on the first click or key press. It plays at the **original's own level** (the extracted file is the
+unmodified 2005 audio). The panel's volume slider goes from silent to that level (100%, squared curve: 50% = -12 dB) and **M**
+or the button toggles mute; both are remembered per browser. `?sound=0` disables it; `?volume=<dB>` (0 = original) overrides
+the slider - the Windows screensaver passes its Volume setting this way. `?clean=1` and `?t=` captures are silent.
 
 ## Deploy (public)
 

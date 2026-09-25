@@ -29,6 +29,8 @@ namespace Lma2Saver
         private readonly ComboBox tank = Combo("The original's tank (17)", "The original's tank + one of every other species (25)", "One of every species (19)");
         private readonly CheckBox schooling = new CheckBox { Text = "Schooling", AutoSize = true };
         private readonly CheckBox sound = new CheckBox { Text = "Play the underwater sound", AutoSize = true };
+        private readonly TrackBar volume = new TrackBar { Minimum = 0, Maximum = 100, TickFrequency = 10, SmallChange = 5, LargeChange = 20, Width = 240, AutoSize = true };
+        private readonly Label volumeText = new Label { AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(6, 6, 0, 0) };
         private readonly CheckBox allMonitors = new CheckBox { Text = "Show on every monitor (otherwise black)", AutoSize = true };
 
         private static readonly string[] Scenes = { "rotate", "1", "2", "3" };
@@ -70,6 +72,12 @@ namespace Lma2Saver
             Row(grid, "Fish", tank);
             Row(grid, "", schooling);
             Row(grid, "", sound);
+            var volumeRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            volumeRow.Controls.Add(volume);
+            volumeRow.Controls.Add(volumeText);
+            Row(grid, "Volume", volumeRow);
+            volume.ValueChanged += (s, e) => volumeText.Text = volume.Value + "%" + (volume.Value == 100 ? " (original)" : "");
+            sound.CheckedChanged += (s, e) => volume.Enabled = sound.Checked;
             Row(grid, "", allMonitors);
             if (setup)
             {
@@ -130,6 +138,9 @@ namespace Lma2Saver
             tank.SelectedIndex = Math.Max(0, Array.IndexOf(Tanks, settings.Tank));
             schooling.Checked = settings.Schooling;
             sound.Checked = settings.Sound;
+            volume.Value = settings.Volume;
+            volumeText.Text = volume.Value + "%" + (volume.Value == 100 ? " (original)" : "");
+            volume.Enabled = sound.Checked;
             allMonitors.Checked = settings.AllMonitors;
         }
 
@@ -141,6 +152,7 @@ namespace Lma2Saver
             settings.Tank = Tanks[tank.SelectedIndex];
             settings.Schooling = schooling.Checked;
             settings.Sound = sound.Checked;
+            settings.Volume = volume.Value;
             settings.AllMonitors = allMonitors.Checked;
             settings.Save();
         }
