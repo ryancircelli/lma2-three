@@ -58,6 +58,11 @@ export class Effects {
   }
 
   /** Drawing-buffer pixels per world unit of the (orthographic) tank camera. */
+  /** The bubble column's axis x (.X space), or null (bubbles.ts). */
+  bubbleColumn(): number | null {
+    return this.bubbles.column();
+  }
+
   setScale(pxPerWorld: number): void {
     this.bubbles.setScale(pxPerWorld);
     this.motes.setScale(pxPerWorld);

@@ -6,14 +6,15 @@
   <title>Living Marine Aquarium 2</title>
   <style>
     html, body { margin: 0; height: 100%; background: #0b3a52; color: #d8eef8; font: 14px/1.4 system-ui, sans-serif; overflow: hidden; }
-    #view { display: block; width: 100vw; height: 100vh; }
+    #view { display: block; width: 100vw; height: 100vh; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
     #panel {
       position: fixed; top: 12px; left: 12px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
       padding: 10px 12px; max-width: calc(100vw - 48px);
       background: rgba(4, 22, 34, 0.72); border: 1px solid rgba(160, 210, 240, 0.18); border-radius: 8px;
     }
     #panel select { font: inherit; }
-    #panel input.volume { width: 90px; vertical-align: middle; accent-color: #4fb3ff; }
+    #panel label.volume { display: inline-flex; align-items: center; gap: 6px; }
+    #panel input.volume { width: 90px; accent-color: #4fb3ff; }
     #panel a { color: #9fd8ff; text-decoration: none; }
     #panel a:hover { text-decoration: underline; }
     #info { position: fixed; left: 12px; bottom: 12px; padding: 6px 10px; background: rgba(4, 22, 34, 0.72); border-radius: 6px; }
@@ -41,7 +42,14 @@
     #panel button.active { outline: 1px solid rgba(160, 210, 240, 0.6); }
     body.clean #fishpicker, body.idle #fishpicker { display: none; }
     /* Fullscreen with no recent mouse movement (main.ts): screensaver look */
-    body.idle #panel, body.idle #info { opacity: 0; pointer-events: none; }
+    body.idle #panel, body.idle #info, body.idle #exitfs { opacity: 0; pointer-events: none; }
+    #exitfs {
+      position: fixed; top: 12px; right: 12px; z-index: 3; width: 36px; height: 36px; padding: 0;
+      font: 18px/1 system-ui, sans-serif; color: #d8eef8; cursor: pointer; transition: opacity 0.4s;
+      background: rgba(4, 22, 34, 0.72); border: 1px solid rgba(160, 210, 240, 0.18); border-radius: 50%;
+    }
+    #exitfs:hover { background: rgba(20, 60, 85, 0.9); }
+    body.clean #exitfs { display: none; }
     body.idle, body.idle #view { cursor: none; }
     #panel, #info { transition: opacity 0.4s; }
     /* Loading screen (loading.ts): the original's splash over black */

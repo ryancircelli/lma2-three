@@ -28,7 +28,6 @@ namespace Lma2Saver
         private readonly ComboBox speed = Combo("0.5x", "1x", "1.5x", "2x", "3x", "4x");
         private readonly ComboBox tank = Combo("The original's tank (17)", "The original's tank + one of every other species (25)", "One of every species (19)");
         private readonly CheckBox schooling = new CheckBox { Text = "Schooling", AutoSize = true };
-        private readonly CheckBox sound = new CheckBox { Text = "Play the underwater sound", AutoSize = true };
         private readonly TrackBar volume = new TrackBar { Minimum = 0, Maximum = 100, TickFrequency = 10, SmallChange = 5, LargeChange = 20, Width = 240, AutoSize = true };
         private readonly Label volumeText = new Label { AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(6, 6, 0, 0) };
         private readonly CheckBox allMonitors = new CheckBox { Text = "Show on every monitor (otherwise black)", AutoSize = true };
@@ -71,13 +70,11 @@ namespace Lma2Saver
             Row(grid, "Speed", speed);
             Row(grid, "Fish", tank);
             Row(grid, "", schooling);
-            Row(grid, "", sound);
             var volumeRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
             volumeRow.Controls.Add(volume);
             volumeRow.Controls.Add(volumeText);
             Row(grid, "Volume", volumeRow);
-            volume.ValueChanged += (s, e) => volumeText.Text = volume.Value + "%" + (volume.Value == 100 ? " (original)" : "");
-            sound.CheckedChanged += (s, e) => volume.Enabled = sound.Checked;
+            volume.ValueChanged += (s, e) => volumeText.Text = VolumeText(volume.Value);
             Row(grid, "", allMonitors);
             if (setup)
             {
@@ -137,10 +134,8 @@ namespace Lma2Saver
             speed.SelectedIndex = Math.Max(0, Array.IndexOf(Speeds, settings.Speed));
             tank.SelectedIndex = Math.Max(0, Array.IndexOf(Tanks, settings.Tank));
             schooling.Checked = settings.Schooling;
-            sound.Checked = settings.Sound;
             volume.Value = settings.Volume;
-            volumeText.Text = volume.Value + "%" + (volume.Value == 100 ? " (original)" : "");
-            volume.Enabled = sound.Checked;
+            volumeText.Text = VolumeText(volume.Value);
             allMonitors.Checked = settings.AllMonitors;
         }
 
@@ -151,7 +146,6 @@ namespace Lma2Saver
             settings.Speed = Speeds[speed.SelectedIndex];
             settings.Tank = Tanks[tank.SelectedIndex];
             settings.Schooling = schooling.Checked;
-            settings.Sound = sound.Checked;
             settings.Volume = volume.Value;
             settings.AllMonitors = allMonitors.Checked;
             settings.Save();
@@ -180,6 +174,11 @@ namespace Lma2Saver
                 Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
             Installer.OpenWindowsDialog();
             Close();
+        }
+
+        private static string VolumeText(int v)
+        {
+            return v == 0 ? "Off" : v + "%" + (v == 100 ? " (original)" : "");
         }
 
         private static ComboBox Combo(params string[] items)

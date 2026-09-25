@@ -104,14 +104,18 @@ Live at **https://lma2.ryancircelli.com**. The panel (top left) has:
 - **Scene** - 1 to 3. With no `?scene=`, each load shows the next scene, as each launch of the original did.
 - **View** - how the original's 4:3 frame meets another window shape: **Fit** (4:3 with black bars, the default), **Fill**
   (zoom to cover, crops top and bottom on 16:9) or **Stretch**. `?aspect=fit|fill|stretch`.
-- **Sound** - the original's one ambient loop at its original level, with a volume slider beside it; **M** mutes.
-  `?sound=0`, `?volume=<dB>` (0 = original).
+- **Volume** - the original's one ambient loop; the slider runs to the original's level (100%) and starts at 50%. **M**
+  mutes / restores. `?sound=0`, `?volume=<dB>` (0 = original).
 - **Fish (N)** - how many of each of the 19 species (0-100; crab and sea star 0-1), presets, schooling. `?tank=slug:n,...`
 - **Speed** - 0.5x to 4x playback. `?speed=`
-- **Fullscreen** - also **F** or double-click; the panel and cursor hide until the mouse moves, and the display is kept awake.
-- **Fish food** (not in the original) - click in the tank to drop a pinch of flakes. They sink slowly; fish in reach break off,
-  dart to the nearest flake and eat it (usually within a second or so), then go back to their usual swimming. Sea horses, the
-  crab and the sea star ignore it. Off in reference captures (`?t=`, `?clean=1`) and in the screensaver, where a click exits;
+- **Fullscreen** - also **F** or double-click; exit with the **X** at the top right (or Esc / F). The panel, the X and the
+  cursor hide until the mouse moves, and the display is kept awake.
+- **Fish food** (not in the original) - click in the tank to drop a pinch of flakes; hold the button to keep pouring (up to
+  40 in the water). They sink slowly, and the bubble column lifts any that drift into it and throws them out to the side. Fish
+  in reach break off and dart for the nearest flake; it is eaten only when a fish's mouth (the front tip of its model) reaches
+  it, so they sometimes overshoot and come round again. A fish that has eaten ignores food for 10-15 s, so the others get a
+  turn. Sea horses, the crab and the sea star ignore it. A double-click toggles fullscreen and takes back its first click's
+  pinch. Off in reference captures (`?t=`, `?clean=1`) and in the screensaver, where a click exits;
   the flakes use their own randomness, so the original's creature behaviour is unchanged until someone feeds.
 
 Randomness: normal viewing seeds the original's MSVC `rand()` from the clock, like the original's `srand(GetTickCount())`, so
@@ -159,9 +163,9 @@ adversarial reviewer, using logic recovered by decompiling the original (`docs/o
 
 The original's only sound, `Sound_undwater.ogg`, loops gaplessly (Web Audio) in the tank view. Browsers allow audio only after
 a gesture, so it starts on the first click or key press. It plays at the **original's own level** (the extracted file is the
-unmodified 2005 audio). The panel's volume slider goes from silent to that level (100%, squared curve: 50% = -12 dB) and **M**
-or the button toggles mute; both are remembered per browser. `?sound=0` disables it; `?volume=<dB>` (0 = original) overrides
-the slider - the Windows screensaver passes its Volume setting this way. `?clean=1` and `?t=` captures are silent.
+unmodified 2005 audio). The panel's **Volume** slider goes from silent to that level (100%, squared curve: 50% = -12 dB) and
+starts at 50%; it is remembered per browser, and **M** mutes / restores. `?sound=0` disables it; `?volume=<dB>` (0 = original)
+overrides the slider - the Windows screensaver passes its Volume setting this way. `?clean=1` and `?t=` captures are silent.
 
 ## Deploy (public)
 

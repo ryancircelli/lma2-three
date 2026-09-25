@@ -57,6 +57,11 @@ declare global {
     /** Drop fish food at (nx, ny) in -1..1 over the frame (tests). */
     lma2Feed?: (nx: number, ny: number) => void;
     lma2Food?: () => number;
+    lma2Fed?: () => number;
+    lma2Flakes?: () => { x: number; y: number }[];
+    lma2Bubbles?: () => number | null;
+    /** Every fish's mouth in CSS px (tests). */
+    lma2Mouths?: () => { x: number; y: number }[];
   }
 }
 
@@ -203,13 +208,63 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
   if (!capture && params.get("saver") !== "1") {
     window.lma2Feed = (nx: number, ny: number) => tank.feed(nx, ny); // for tests
     window.lma2Food = () => tank.foodCount;
-    canvas.addEventListener("pointerdown", (e) => {
-      if (e.button !== 0) return;
+    window.lma2Fed = () => tank.fedCount;
+    window.lma2Flakes = () => tank.flakes;
+    window.lma2Bubbles = () => tank.bubbleX;
+    window.lma2Mouths = () => {
+      const out: { x: number; y: number }[] = [], c = tank.camera, f = frameRect;
+      for (let i = 0; i < 200; i++) {
+        const m = tank.mouthPos(i);
+        if (m) out.push({ x: f.x + (m.x - c.left) / (c.right - c.left) * f.w, y: f.y + (c.top - m.y) / (c.top - c.bottom) * f.h });
+      }
+      return out;
+    };
+    feedingOwnsDoubleClick = true;
+    // A click drops a pinch; holding the button keeps pouring from the cursor.
+    let pour = 0, px = 0, py = 0;
+    const at = (e: PointerEvent): boolean => {
       const r = canvas.getBoundingClientRect(), f = frameRect;
       const x = e.clientX - r.left - f.x, y = e.clientY - r.top - f.y;
-      if (x < 0 || y < 0 || x > f.w || y > f.h) return; // the black bars
-      tank.feed((x / f.w) * 2 - 1, 1 - (y / f.h) * 2);
+      if (x < 0 || y < 0 || x > f.w || y > f.h) return false; // the black bars
+      px = (x / f.w) * 2 - 1;
+      py = 1 - (y / f.h) * 2;
+      return true;
+    };
+    const stop = () => {
+      clearInterval(pour);
+      pour = 0;
+    };
+    let lastDown = -1e9, lastX = 0, lastY = 0;
+    canvas.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      // A double-click toggles fullscreen and takes back the first click's pinch.
+      // Detected here: preventDefault below makes the browser's own dblclick unreliable.
+      const now = performance.now();
+      const double = now - lastDown < 400 && Math.hypot(e.clientX - lastX, e.clientY - lastY) < 16;
+      lastDown = double ? -1e9 : now;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      if (double) {
+        stop();
+        tank.undoPinch();
+        toggleFullscreen?.();
+        return;
+      }
+      if (!at(e)) return;
+      e.preventDefault(); // no text selection or drag gesture
+      canvas.setPointerCapture(e.pointerId);
+      tank.feed(px, py);
+      stop();
+      const started = performance.now();
+      pour = setInterval(() => {
+        if (performance.now() - started > 300) tank.feed(px, py, 1, 0.5);
+      }, 140);
     });
+    canvas.addEventListener("pointermove", (e) => {
+      if (pour) at(e);
+    });
+    for (const type of ["pointerup", "pointercancel", "lostpointercapture"] as const) canvas.addEventListener(type, stop);
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault()); // touch long-press
   }
 
   // --- water surface (src/surface.ts): scene pass 0, just before the
@@ -271,6 +326,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     nearScene.add(model.near);
     await tank.setScene(id, ASSETS); // [feat/fish] fish bounds, sea floor, reef line
     await effects.setScene(id, ASSETS, model); // --- effects
+    tank.bubbleX = effects.bubbleColumn(); // fish food drifts in the bubble column
     fit();
     done(`scene-${id}`, `Scene ${id} · ${tank.count} creatures`);
   }
@@ -555,6 +611,10 @@ async function main(): Promise<void> {
 
 // The source, and the Windows screensaver build (screensaver/, published by
 // .github/workflows/release.yml; "latest" always points at the newest release).
+/** Fullscreen toggle (setupFullscreen), and whether the fish-food handler detects double-clicks itself. */
+let toggleFullscreen: (() => void) | null = null;
+let feedingOwnsDoubleClick = false;
+
 const GITHUB = "https://github.com/ryancircelli/lma2-three";
 const SCREENSAVER = `${GITHUB}/releases/latest/download/LMA2-Aquarium-Setup.exe`;
 
@@ -585,12 +645,29 @@ function setupFullscreen(): void {
   };
   const button = document.createElement("button");
   button.type = "button";
-  button.title = "Toggle fullscreen (F or double-click)";
-  const render = () => (button.textContent = document.fullscreenElement ? "Exit fullscreen" : "Fullscreen");
-  render();
+  button.title = "Fullscreen (F or double-click)";
+  button.textContent = "Fullscreen";
   button.addEventListener("click", toggle);
   panel.append(button);
-  canvas.addEventListener("dblclick", toggle);
+  // In fullscreen the way out is its own button, top right (it hides with the panel).
+  const exit = document.createElement("button");
+  exit.type = "button";
+  exit.id = "exitfs";
+  exit.title = "Exit fullscreen (Esc, F or double-click)";
+  exit.setAttribute("aria-label", "Exit fullscreen");
+  exit.textContent = "\u2715";
+  exit.addEventListener("click", toggle);
+  document.body.append(exit);
+  const render = () => {
+    const full = !!document.fullscreenElement;
+    button.hidden = full;
+    exit.hidden = !full;
+  };
+  render();
+  toggleFullscreen = toggle;
+  canvas.addEventListener("dblclick", () => {
+    if (!feedingOwnsDoubleClick) toggle();
+  });
   addEventListener("keydown", (e) => {
     const target = e.target as HTMLElement | null;
     if (target?.tagName === "SELECT" || target?.tagName === "INPUT") return;
@@ -626,6 +703,7 @@ function setupFullscreen(): void {
   document.addEventListener("fullscreenchange", () => {
     render();
     button.blur(); // so Space/Enter don't re-trigger it
+    exit.blur();
     wake();
     void holdAwake(!!document.fullscreenElement);
   });

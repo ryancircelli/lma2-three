@@ -98,6 +98,11 @@ export class BubbleSim {
     return this.particles.length;
   }
 
+  /** The column's axis x (.X space): the emitter plus the mean spawn offset (-5). */
+  get axis(): number {
+    return this.x0 - 5;
+  }
+
   /** Re-create every particle from its seed, first life starting (at the
    * bottom) PRESIM s before t = 0. */
   private spawnAll(): void {
@@ -181,6 +186,11 @@ export class Bubbles {
   /** Switch scene: `box` is the scene box (scenebox.ts), in .X space. */
   setScene(id: string, box: THREE.Box3): void {
     this.sim.setScene(id, box);
+  }
+
+  /** The bubble column's axis x (.X space), or null when bubbles are off (fish food uses it). */
+  column(): number | null {
+    return this.enabled && this.sim.count > 0 ? this.sim.axis : null;
   }
 
   /** Drawing-buffer pixels per world unit (the painting camera's scale). */
