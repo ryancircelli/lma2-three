@@ -61,6 +61,7 @@ declare global {
     lma2Flakes?: () => { x: number; y: number }[];
     lma2Bubbles?: () => number | null;
     lma2FeedStats?: () => { eats: number; misses: number; repeats: number };
+    lma2FeedLog?: () => { fish: number; species: string; t: number }[];
     /** Every fish's mouth in CSS px (tests). */
     lma2Mouths?: () => { x: number; y: number }[];
   }
@@ -213,6 +214,7 @@ async function tankView(manifest: Manifest): Promise<(t: number) => void> {
     window.lma2Flakes = () => tank.flakes;
     window.lma2Bubbles = () => tank.bubbleX;
     window.lma2FeedStats = () => tank.feedStats;
+    window.lma2FeedLog = () => tank.feedLog;
     window.lma2Mouths = () => {
       const out: { x: number; y: number }[] = [], c = tank.camera, f = frameRect;
       for (let i = 0; i < 200; i++) {

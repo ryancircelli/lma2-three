@@ -324,7 +324,7 @@ const FLAKE_LIFE = 15;
 /** At most this many flakes in the water (holding the button pours). */
 const FLAKE_MAX = 40;
 /** After eating, a fish ignores food for this long (s), plus up to half again. */
-const FULL_TIME = 10;
+const FULL_TIME = 30;
 /** Bubble column: half-width over which it lifts flakes, and their rise speed (units/s, the bubbles' median). */
 const COLUMN_R = 75;
 const COLUMN_RISE = 90;
@@ -361,6 +361,8 @@ export class Tank {
   private approach = new Map<Fish, { k: Flake; ahead: boolean; missed: boolean }>();
   /** Feeding counters (tests): flakes eaten, first misses, and second passes (always eaten). */
   readonly feedStats = { eats: 0, misses: 0, repeats: 0 };
+  /** Recent bites (tests): which fish (creation slot), its species, and when. */
+  readonly feedLog: { fish: number; species: string; t: number }[] = [];
   /** Fish that have eaten, and the tank time until which they ignore food. */
   private fullUntil = new Map<Fish, number>();
   /** The bubble column's axis x (.X space), or null: set by the page (effects.bubbleColumn). */
@@ -1467,6 +1469,8 @@ export class Tank {
     if (mouth.distanceTo(k.pos) < W * 0.009) {
       this.approach.delete(f);
       this.feedStats.eats++;
+      this.feedLog.push({ fish: this.roster.indexOf(f), species: f.species, t: Math.round(this.t * 10) / 10 });
+      if (this.feedLog.length > 300) this.feedLog.shift();
       this.removeFlake(k);
       this.fullUntil.set(f, this.t + FULL_TIME * (1 + 0.5 * Math.random())); // one flake each, then others get a turn
     }
