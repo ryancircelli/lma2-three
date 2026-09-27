@@ -58,7 +58,7 @@ declare global {
     lma2Feed?: (nx: number, ny: number) => void;
     lma2Food?: () => number;
     lma2Fed?: () => number;
-    lma2Flakes?: () => { x: number; y: number }[];
+    lma2Flakes?: () => { x: number; y: number; z: number; ground: number }[];
     lma2Bubbles?: () => number | null;
     lma2FeedStats?: () => { eats: number; misses: number; repeats: number };
     lma2FeedLog?: () => { fish: number; species: string; t: number }[];

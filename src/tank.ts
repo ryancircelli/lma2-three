@@ -116,6 +116,92 @@ function rotZ(v: THREE.Vector3, a: number): THREE.Vector3 {
 }
 
 /** What the creatures need from a scene's data files. */
+/**
+ * Where fish food comes to rest: the scene's Relief mesh (the invisible,
+ * terrain-like light-catcher shaped like the painted reef - sand near the
+ * glass, reef rising behind) rasterised to a height map over x and z (.X space).
+ * Cells the mesh leaves uncovered take the nearest covered height along z
+ * (then x), so every (x, z) in its range has a ground.
+ */
+interface Ground {
+  x0: number;
+  z0: number;
+  cell: number;
+  nx: number;
+  nz: number;
+  h: Float32Array; // top y per cell, [iz * nx + ix]
+  zMin: number;
+  zMax: number;
+}
+
+function buildGround(tris: number[][], cell = 12): Ground | null {
+  if (!tris.length) return null;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const t of tris) for (let i = 0; i < 9; i += 3) x0 = Math.min(x0, t[i]), x1 = Math.max(x1, t[i]), z0 = Math.min(z0, t[i + 2]), z1 = Math.max(z1, t[i + 2]);
+  const nx = Math.ceil((x1 - x0) / cell) + 1, nz = Math.ceil((z1 - z0) / cell) + 1;
+  const h = new Float32Array(nx * nz).fill(-Infinity);
+  const put = (ix: number, iz: number, y: number) => {
+    const i = iz * nx + ix;
+    if (y > h[i]) h[i] = y;
+  };
+  for (const t of tris) {
+    const [ax, ay, az, bx, by, bz, cx, cy, cz] = t;
+    // vertices themselves (tiny triangles may cover no cell centre)
+    for (let i = 0; i < 9; i += 3) put(Math.round((t[i] - x0) / cell), Math.round((t[i + 2] - z0) / cell), t[i + 1]);
+    const d = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
+    if (Math.abs(d) < 1e-6) continue; // edge-on from above
+    const i0 = Math.max(0, Math.floor((Math.min(ax, bx, cx) - x0) / cell)), i1 = Math.min(nx - 1, Math.ceil((Math.max(ax, bx, cx) - x0) / cell));
+    const k0 = Math.max(0, Math.floor((Math.min(az, bz, cz) - z0) / cell)), k1 = Math.min(nz - 1, Math.ceil((Math.max(az, bz, cz) - z0) / cell));
+    for (let iz = k0; iz <= k1; iz++) {
+      const z = z0 + iz * cell;
+      for (let ix = i0; ix <= i1; ix++) {
+        const x = x0 + ix * cell;
+        const l1 = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / d;
+        const l2 = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / d;
+        const l3 = 1 - l1 - l2;
+        if (l1 < -1e-4 || l2 < -1e-4 || l3 < -1e-4) continue;
+        put(ix, iz, l1 * ay + l2 * by + l3 * cy);
+      }
+    }
+  }
+  // fill gaps: along z from the nearest covered cell (near side first), then along x
+  for (let ix = 0; ix < nx; ix++) {
+    let last = -Infinity;
+    for (let iz = 0; iz < nz; iz++) {
+      const i = iz * nx + ix;
+      if (h[i] > -Infinity) last = h[i];
+      else h[i] = last;
+    }
+    last = -Infinity;
+    for (let iz = nz - 1; iz >= 0; iz--) {
+      const i = iz * nx + ix;
+      if (h[i] > -Infinity) last = h[i];
+      else h[i] = last;
+    }
+  }
+  for (let iz = 0; iz < nz; iz++) {
+    for (const dir of [1, -1]) {
+      let last = -Infinity;
+      for (let ix = dir > 0 ? 0 : nx - 1; ix >= 0 && ix < nx; ix += dir) {
+        const i = iz * nx + ix;
+        if (h[i] > -Infinity) last = h[i];
+        else h[i] = last;
+      }
+    }
+  }
+  return { x0, z0, cell, nx, nz, h, zMin: z0, zMax: z1 };
+}
+
+/** Ground height at (x, z), bilinear; -Infinity outside / without a ground. */
+function groundAt(g: Ground | null, x: number, z: number): number {
+  if (!g) return -Infinity;
+  const fx = Math.min(Math.max((x - g.x0) / g.cell, 0), g.nx - 1), fz = Math.min(Math.max((z - g.z0) / g.cell, 0), g.nz - 1);
+  const ix = Math.min(Math.floor(fx), g.nx - 2), iz = Math.min(Math.floor(fz), g.nz - 2);
+  const u = fx - ix, v = fz - iz, h = g.h, n = g.nx;
+  const a = h[iz * n + ix], b = h[iz * n + ix + 1], c = h[(iz + 1) * n + ix], d = h[(iz + 1) * n + ix + 1];
+  return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+}
+
 interface SceneData {
   /** Every vertex of scenes/<n>/mesh.X, world space (the camera's box too). */
   bbox: Box;
@@ -131,6 +217,8 @@ interface SceneData {
    * three scenes (see setScene) - not the drawn reef edge.
    */
   height: (x: number) => number;
+  /** Where fish food lands (not in the original): the Relief as a height map. */
+  ground: Ground | null;
 }
 
 /** The mood timer object (0x408af0 / 0x408b50): start, duration, max duration, state. */
@@ -306,11 +394,13 @@ const CRAB_FRAMES = 12;
  */
 interface Flake {
   pos: THREE.Vector3; // .X space, like Fish.pos
+  r: number; // radius, world units
   vx: number;
   vy: number;
   sink: number; // its own sinking speed (negative), what vy relaxes to
   wobble: number;
   age: number;
+  rested: number; // seconds lying on the ground
   mesh: THREE.Mesh;
 }
 /** Fish within this fraction of the tank width of a flake come for it. */
@@ -319,8 +409,9 @@ const FEED_REACH = 0.55;
 const FEED_BOOST = 2.6;
 /** Turn rate toward food, radians per second. */
 const FEED_TURN = 5;
-/** Uneaten flakes vanish after this many seconds. */
+/** Uneaten flakes dissolve after lying on the ground this long (s), or after FLAKE_MAX_AGE in the water. */
 const FLAKE_LIFE = 15;
+const FLAKE_MAX_AGE = 60;
 /** At most this many flakes in the water (holding the button pours). */
 const FLAKE_MAX = 40;
 /** After eating, a fish ignores food for this long (s), plus up to half again. */
@@ -416,7 +507,12 @@ export class Tank {
     // modelled flat in its XZ plane (every raw y is 0; the frame rotates it
     // upright), so in the original height(x) = 0 everywhere [read].
     let heightPts: [number, number][] = [];
+    const reliefTris: number[][] = []; // fish food's ground (buildGround)
     for (const m of doc.meshes) {
+      if (m.name === "Relief") {
+        const w = (i: number) => v.fromArray(m.positions, 3 * i).applyMatrix4(m.world).toArray();
+        for (const face of m.faces) for (let j = 1; j + 1 < face.length; j++) reliefTris.push([...w(face[0]), ...w(face[j]), ...w(face[j + 1])]);
+      }
       for (let i = 0; i < m.positions.length; i += 3) {
         v.fromArray(m.positions, i).applyMatrix4(m.world);
         bbox.minX = Math.min(bbox.minX, v.x), bbox.maxX = Math.max(bbox.maxX, v.x);
@@ -447,6 +543,7 @@ export class Tank {
       floor: polyline(raw.map(([x, y]) => [x, y + Ay - 30])),
       walkPath: sorted.map(([x, y]) => [x, y + Ay - 80]),
       height: polyline(heightPts.length ? heightPts : [[0, bbox.minY]]),
+      ground: buildGround(reliefTris),
     };
     this.sceneId = id;
     this.fog.color.setHex(WATER[id] ?? 0);
@@ -1275,36 +1372,51 @@ export class Tank {
 
   /**
    * Drop a pinch of flakes where the view was clicked: (nx, ny) in -1..1 over
-   * the 4:3 frame. They start just behind the front glass, in front of the reef.
+   * the 4:3 frame. Each flake gets its own depth within the ground's range (the
+   * near zone the fish swim in), one where the clicked point is above the
+   * ground, so it never starts inside the reef; nearer flakes are drawn a
+   * little bigger, by the fish's own size law.
    */
   feed(nx: number, ny: number, count = 4, spread = 1): void {
     if (!this.data) return;
-    const c = this.camera, d = this.data, b = d.bounds;
+    const c = this.camera, d = this.data, b = d.bounds, g = d.ground;
     const W = b.maxX - b.minX, H = b.maxY - b.minY, depth = b.maxZ - b.minZ;
     const x = c.left + (nx + 1) / 2 * (c.right - c.left);
-    const y = Math.max(c.bottom + (ny + 1) / 2 * (c.top - c.bottom), d.floor(x) + 0.02 * H);
-    const z = Math.min(b.minZ + 0.25 * depth, -150);
+    const y = c.bottom + (ny + 1) / 2 * (c.top - c.bottom);
+    // the depth band: from just behind the glass to the back of the ground (in front of the painting)
+    const zA = Math.max(g ? g.zMin : -Infinity, b.minZ + 0.04 * depth);
+    const zB = Math.min(g ? g.zMax : b.minZ + 0.25 * depth, -50);
+    const clear = (x: number, y: number, z: number) => !g || groundAt(g, x, z) < y - 0.02 * H;
+    const tries: number[] = [];
+    for (let i = 0; i < 16; i++) {
+      const z = zA + Math.random() * (zB - zA);
+      if (clear(x, y, z)) tries.push(z);
+    }
+    const zBase = tries.length ? tries[Math.floor(Math.random() * tries.length)] : zA;
     this.flakeGeo ??= new THREE.IcosahedronGeometry(1, 0);
     for (let i = 0; i < count; i++) {
       if (this.food.length >= FLAKE_MAX) this.removeFlake(this.food[0]); // oldest first
+      const z = Math.min(zB, Math.max(zA, zBase + (Math.random() - 0.5) * depth * 0.06 * spread));
+      const fx = x + (Math.random() - 0.5) * W * 0.035 * spread;
+      const near = (0.8 + 0.4 * (b.maxZ - z) / depth) / 1.2; // the fish size law (updateFish), ~1 at the glass
+      const r = W * (0.0035 + Math.random() * 0.0025) * near;
+      const floor = g ? groundAt(g, fx, z) + 0.5 * r : d.floor(fx) + 0.01 * H;
+      const fy = Math.max(y + (Math.random() - 0.5) * H * 0.03 * spread, floor);
       const mesh = new THREE.Mesh(this.flakeGeo, this.flakeMat);
-      const r = W * (0.0035 + Math.random() * 0.0025);
       mesh.scale.set(r, r * 0.55, r);
       mesh.rotation.set(Math.random() * 6.3, Math.random() * 6.3, 0);
       mesh.matrixAutoUpdate = true;
-      this.scene.add(mesh);
+      this.scene.add(mesh); // z < 0: in front of the painting, with the front fish
       const sink = -H * (0.025 + Math.random() * 0.02);
       this.food.push({
-        pos: new THREE.Vector3(
-          x + (Math.random() - 0.5) * W * 0.035 * spread,
-          y + (Math.random() - 0.5) * H * 0.03 * spread,
-          z + (Math.random() - 0.5) * depth * 0.04,
-        ),
+        pos: new THREE.Vector3(fx, fy, z),
+        r,
         vx: 0,
         vy: sink,
         sink,
         wobble: Math.random() * 6.3,
         age: 0,
+        rested: 0,
         mesh,
       });
     }
@@ -1323,9 +1435,10 @@ export class Tank {
     return n;
   }
 
-  /** Flake positions, .X space (for tests). */
-  get flakes(): { x: number; y: number }[] {
-    return this.food.map((k) => ({ x: k.pos.x, y: k.pos.y }));
+  /** Flake positions and the ground under each, .X space (for tests). */
+  get flakes(): { x: number; y: number; z: number; ground: number }[] {
+    const g = this.data?.ground ?? null;
+    return this.food.map((k) => ({ x: k.pos.x, y: k.pos.y, z: k.pos.z, ground: groundAt(g, k.pos.x, k.pos.z) }));
   }
 
   private updateFood(dt: number): void {
@@ -1348,16 +1461,37 @@ export class Tank {
         k.vy += (k.sink - k.vy) * Math.min(1, 1.5 * dt);
         k.vx *= Math.max(0, 1 - 1.2 * dt);
       }
-      const rest = d.floor(k.pos.x) + 0.01 * H;
+      const rest = this.restY(k);
       if (k.pos.y > rest || k.vy > 0) {
         k.pos.y = Math.min(top, Math.max(rest, k.pos.y + k.vy * dt));
         k.pos.x += (k.vx + Math.sin(k.wobble) * H * 0.012) * dt;
         k.mesh.rotation.y += dt * 1.5;
       }
+      if (k.pos.y <= rest + 1e-3) k.rested += dt; // lying on the ground
+      // dissolve: shrink away over the last 2 s
+      const left = Math.min(FLAKE_LIFE - k.rested, FLAKE_MAX_AGE - k.age);
+      const s = k.r * Math.max(0, Math.min(1, left / 2));
+      k.mesh.scale.set(s, s * 0.55, s);
     }
-    const gone = this.food.filter((k) => k.age > FLAKE_LIFE);
+    const gone = this.food.filter((k) => k.rested > FLAKE_LIFE || k.age > FLAKE_MAX_AGE);
     for (const k of gone) this.removeFlake(k);
     this.syncFood();
+  }
+
+  /** The height a flake rests at: on the ground under it (the Relief), else the fish floor. */
+  private restY(k: Flake): number {
+    const d = this.data!;
+    return d.ground ? groundAt(d.ground, k.pos.x, k.pos.z) + 0.5 * k.r : d.floor(k.pos.x) + 0.01 * (d.bounds.maxY - d.bounds.minY);
+  }
+
+  /**
+   * Can a fish get its mouth to the flake? Fish never swim below the fish
+   * floor or (much) below the bounds, so a flake lying on the sand under that
+   * is left alone rather than chased forever.
+   */
+  private reachable(k: Flake): boolean {
+    const d = this.data!, b = d.bounds;
+    return k.pos.y > Math.max(d.floor(k.pos.x), b.minY) - 0.05 * (b.maxY - b.minY);
   }
 
   private syncFood(): void {
@@ -1373,7 +1507,7 @@ export class Tank {
    */
   private targetFlake(f: Fish): Flake | null {
     const locked = this.approach.get(f)?.k;
-    if (locked && this.food.includes(locked)) return locked;
+    if (locked && this.food.includes(locked) && this.reachable(locked)) return locked;
     return this.nearestFlake(f.pos);
   }
 
@@ -1382,6 +1516,7 @@ export class Tank {
     const b = this.data!.bounds, reach = FEED_REACH * (b.maxX - b.minX);
     let best: Flake | null = null, bd = reach * reach;
     for (const k of this.food) {
+      if (!this.reachable(k)) continue;
       const dd = p.distanceToSquared(k.pos);
       if (dd < bd) bd = dd, best = k;
     }
