@@ -401,8 +401,64 @@ interface Flake {
   wobble: number;
   age: number;
   rested: number; // seconds lying on the ground
-  mesh: THREE.Mesh;
+  tilt: number; // how it lies once landed (rotation.x), tipped toward the viewer so it still shows
+  rock: number; // phase of its rocking while it sinks
+  mesh: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
 }
+/**
+ * Flake shapes: thin, irregular, slightly crumpled polygons (unit radius, in
+ * the XY plane, facing +Z), a few variants shared by all flakes.
+ */
+function flakeShapes(n = 6): THREE.BufferGeometry[] {
+  const out: THREE.BufferGeometry[] = [];
+  for (let s = 0; s < n; s++) {
+    const sides = 5 + Math.floor(Math.random() * 4);
+    const ring: number[][] = [];
+    for (let i = 0; i < sides; i++) {
+      const a = (i / sides) * Math.PI * 2 + (Math.random() - 0.5) * 0.6;
+      const rr = 0.6 + Math.random() * 0.45;
+      ring.push([Math.cos(a) * rr, Math.sin(a) * rr * (0.7 + Math.random() * 0.3), (Math.random() - 0.5) * 0.25]);
+    }
+    const pos: number[] = [];
+    const c = [0, 0, (Math.random() - 0.5) * 0.15];
+    for (let i = 0; i < sides; i++) pos.push(...c, ...ring[i], ...ring[(i + 1) % sides]);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.computeVertexNormals(); // flat facets: the crumple catches the light differently
+    out.push(g);
+  }
+  return out;
+}
+
+/** Flake food colours, sRGB: muted tan, rust, orange-brown, olive, dark brown, dull yellow. */
+const FLAKE_COLOURS = [0xa8844f, 0x94462b, 0xa65a2c, 0x6b7236, 0x5a4330, 0x9c8a45];
+
+/**
+ * Flakes are lit in the shader (the scenes hold no three.js lights): light
+ * from above and a little in front, a dim ambient, both faces lit (thin
+ * flakes), and a slight tint toward the scene's water. Raw sRGB in and out,
+ * like the other effects here.
+ */
+const FLAKE_VERTEX = /* glsl */ `
+  varying vec3 vN;
+  void main() {
+    vN = normalize(normalMatrix * normal);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+const FLAKE_FRAGMENT = /* glsl */ `
+  uniform vec3 color;
+  uniform vec3 water;
+  varying vec3 vN;
+  void main() {
+    vec3 n = normalize(vN);
+    if (!gl_FrontFacing) n = -n;
+    float d = abs(dot(n, normalize(vec3(0.2, 0.9, 0.8))));
+    vec3 c = color * (0.55 + 0.5 * d);
+    gl_FragColor = vec4(mix(c, water, 0.14), 1.0);
+  }
+`;
+
 /** Fish within this fraction of the tank width of a flake come for it. */
 const FEED_REACH = 0.55;
 /** Swim-speed multiplier while darting for food. */
@@ -444,8 +500,8 @@ export class Tank {
   private t = 0;
   private predatorClock = 10;
   private food: Flake[] = [];
-  private flakeGeo: THREE.BufferGeometry | null = null;
-  private flakeMat = new THREE.MeshBasicMaterial({ color: 0xd8a860, fog: false });
+  private flakeGeos: THREE.BufferGeometry[] = [];
+  private flakeMat: THREE.ShaderMaterial | null = null;
   /** Each species' mouth in its holder's local space (mouthOf). */
   private mouths = new Map<string, THREE.Vector3>();
   /** Each feeding fish's approach to its flake: closest mouth distance so far, and whether it has missed once. */
@@ -1393,7 +1449,14 @@ export class Tank {
       if (clear(x, y, z)) tries.push(z);
     }
     const zBase = tries.length ? tries[Math.floor(Math.random() * tries.length)] : zA;
-    this.flakeGeo ??= new THREE.IcosahedronGeometry(1, 0);
+    if (!this.flakeGeos.length) this.flakeGeos = flakeShapes();
+    this.flakeMat ??= new THREE.ShaderMaterial({
+      uniforms: { color: { value: new THREE.Vector3() }, water: { value: new THREE.Vector3() } },
+      vertexShader: FLAKE_VERTEX,
+      fragmentShader: FLAKE_FRAGMENT,
+      side: THREE.DoubleSide,
+    });
+    const wh = WATER[this.sceneId ?? "1"] ?? 0;
     for (let i = 0; i < count; i++) {
       if (this.food.length >= FLAKE_MAX) this.removeFlake(this.food[0]); // oldest first
       const z = Math.min(zB, Math.max(zA, zBase + (Math.random() - 0.5) * depth * 0.06 * spread));
@@ -1402,9 +1465,15 @@ export class Tank {
       const r = W * (0.0035 + Math.random() * 0.0025) * near;
       const floor = g ? groundAt(g, fx, z) + 0.5 * r : d.floor(fx) + 0.01 * H;
       const fy = Math.max(y + (Math.random() - 0.5) * H * 0.03 * spread, floor);
-      const mesh = new THREE.Mesh(this.flakeGeo, this.flakeMat);
-      mesh.scale.set(r, r * 0.55, r);
-      mesh.rotation.set(Math.random() * 6.3, Math.random() * 6.3, 0);
+      const mat = this.flakeMat.clone(); // same program; its own colour
+      const hex = FLAKE_COLOURS[Math.floor(Math.random() * FLAKE_COLOURS.length)];
+      const jit = 0.9 + Math.random() * 0.2;
+      mat.uniforms.color.value.set(((hex >> 16) & 255) / 255 * jit, ((hex >> 8) & 255) / 255 * jit, (hex & 255) / 255 * jit);
+      mat.uniforms.water.value.set(((wh >> 16) & 255) / 255, ((wh >> 8) & 255) / 255, (wh & 255) / 255);
+      const mesh = new THREE.Mesh(this.flakeGeos[Math.floor(Math.random() * this.flakeGeos.length)], mat);
+      mesh.scale.setScalar(r * 1.15);
+      // mostly facing the viewer (edge-on flakes read as dark slivers), any way round in its plane
+      mesh.rotation.set((Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8, Math.random() * 6.3);
       mesh.matrixAutoUpdate = true;
       this.scene.add(mesh); // z < 0: in front of the painting, with the front fish
       const sink = -H * (0.025 + Math.random() * 0.02);
@@ -1417,6 +1486,8 @@ export class Tank {
         wobble: Math.random() * 6.3,
         age: 0,
         rested: 0,
+        tilt: -0.6 - Math.random() * 0.35,
+        rock: Math.random() * 6.3,
         mesh,
       });
     }
@@ -1456,7 +1527,7 @@ export class Tank {
       if (w > 0) {
         k.vy += (COLUMN_RISE * (0.6 + 0.4 * Math.sin(k.wobble * 3)) - k.vy) * Math.min(1, 4 * w * dt);
         k.vx += Math.sign(off || Math.random() - 0.5) * 25 * w * dt + (Math.random() - 0.5) * 140 * w * dt;
-        k.mesh.rotation.x += dt * 6 * w;
+        k.mesh.rotation.z += dt * 5 * w; // tumbling in the bubbles
       } else {
         k.vy += (k.sink - k.vy) * Math.min(1, 1.5 * dt);
         k.vx *= Math.max(0, 1 - 1.2 * dt);
@@ -1465,13 +1536,20 @@ export class Tank {
       if (k.pos.y > rest || k.vy > 0) {
         k.pos.y = Math.min(top, Math.max(rest, k.pos.y + k.vy * dt));
         k.pos.x += (k.vx + Math.sin(k.wobble) * H * 0.012) * dt;
-        k.mesh.rotation.y += dt * 1.5;
+        // flutter as it sinks: a slow spin in its own plane and a gentle rocking
+        k.mesh.rotation.z += dt * 1.2;
+        k.mesh.rotation.x = 0.45 * Math.sin(k.wobble * 1.3 + k.rock);
+        k.mesh.rotation.y = 0.4 * Math.sin(k.wobble * 0.9 + 2 * k.rock);
       }
-      if (k.pos.y <= rest + 1e-3) k.rested += dt; // lying on the ground
+      if (k.pos.y <= rest + 1e-3) {
+        k.rested += dt; // lying on the ground: ease flat(ish)
+        const e = Math.min(1, 3 * dt);
+        k.mesh.rotation.x += (k.tilt - k.mesh.rotation.x) * e;
+        k.mesh.rotation.y += (0 - k.mesh.rotation.y) * e;
+      }
       // dissolve: shrink away over the last 2 s
       const left = Math.min(FLAKE_LIFE - k.rested, FLAKE_MAX_AGE - k.age);
-      const s = k.r * Math.max(0, Math.min(1, left / 2));
-      k.mesh.scale.set(s, s * 0.55, s);
+      k.mesh.scale.setScalar(k.r * 1.15 * Math.max(0, Math.min(1, left / 2)));
     }
     const gone = this.food.filter((k) => k.rested > FLAKE_LIFE || k.age > FLAKE_MAX_AGE);
     for (const k of gone) this.removeFlake(k);
@@ -1616,6 +1694,7 @@ export class Tank {
     const i = this.food.indexOf(k);
     if (i >= 0) this.food.splice(i, 1);
     this.scene.remove(k.mesh);
+    k.mesh.material.dispose();
   }
 
   private clearFood(): void {
@@ -1795,8 +1874,10 @@ export class Tank {
 
   dispose(): void {
     this.clearFood();
-    this.flakeGeo?.dispose();
-    this.flakeGeo = null;
+    for (const g of this.flakeGeos) g.dispose();
+    this.flakeGeos = [];
+    this.flakeMat?.dispose();
+    this.flakeMat = null;
     for (const m of this.models.values()) m.dispose();
     this.models.clear();
     this.fish = [];
